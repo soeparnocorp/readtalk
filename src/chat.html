@@ -303,7 +303,7 @@ function startChat() {
     return;
   }
 
-  document.location.hash = "@" + roomname;
+  document.location.hash = "#" + roomname;
 
   chatInput.addEventListener("keydown", event => {
     if (event.keyCode == 38) {
@@ -435,7 +435,7 @@ function join() {
               "* This is a private room. You can invite someone to the room by sending them the URL.");
         } else {
           addChatMessage(null,
-              "* Welcome to @" + roomname + ". Say hi!");
+              "* Welcome to #" + roomname + ". Say hi!");
         }
       }
     } else {
