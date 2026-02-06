@@ -1,8 +1,4 @@
-// Edge Chat Demo – UI-adjusted version
-// Fokus: backend TETAP edge-chat-demo asli
-// Perubahan UI (sidebar / mobile / dark mode) TIDAK mempengaruhi logic di sini
-
-import HTML from "./index.html";
+import HTML from "./chat.html";
 
 async function handleErrors(request, fn) {
   try {
