@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<!--
+  THIS IS NOT THE INTERESTING FILE
+
+  This is just some UI code. There's nothing interesting and unique in this file. The interesting
+  thing about this demo is the server side, which is in chat.mjs.
+
+  WARNING: This was written by a systems engineer, not a web developer. It's probably bad.
+-->
+
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<!--===================================================================================-->
+<!-- Inline style to avoid an extra round trip before the page can render. -->
+<style type="text/css">
+* {
+  box-sizing: border-box;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f0f2f5;
+  color: #111b21;
+}
+
+#chatlog {
+  position: fixed;
+  top: 0;
+  bottom: 60px;
+  left: 300px;
+  right: 0;
+  overflow-y: auto;
+  padding: 20px;
+  overflow-wrap: break-word;
+  background-color: #efeae2;
+  background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z' fill='%23000000' fill-opacity='0.03' fill-rule='evenodd'/%3E%3C/svg%3E");
+}
+#chatlog span.username {
+  font-weight: 600;
+  color: #111b21;
+}
+#spacer {
+  height: calc(100vh - 60px - 5em);
+}
+
+/* Message bubbles */
+#chatlog p {
+  max-width: 65%;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-radius: 7.5px;
+  position: relative;
+  word-wrap: break-word;
+  line-height: 1.4;
+}
+
+/* Sent messages (from current user) */
+#chatlog p:has(> .username) {
+  background-color: #ff0000;
+  color: white;
+  margin-left: auto;
+  margin-right: 0;
+  border-top-right-radius: 0;
+}
+
+/* Received messages */
+#chatlog p:not(:has(> .username)) {
+  background-color: #ffffff;
+  color: #111b21;
+  margin-right: auto;
+  margin-left: 0;
+  border-top-left-radius: 0;
+  box-shadow: 0 1px 0.5px rgba(0,0,0,0.05);
+}
+
+/* System messages */
+#chatlog p:not(:has(> .username)):not(:has(> span)) {
+  background-color: transparent;
+  color: #667781;
+  text-align: center;
+  font-style: italic;
+  max-width: 100%;
+  font-size: 14px;
+}
+
+#roster {
+  font-weight: 600;
+  padding: 20px 0;
+}
+
+p {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+p:last-of-type {
+  margin: 0;
+}
+
+#roster {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 60px;
+  width: 300px;
+  border-right: 1px solid #e0e0e0;
+  background-color: #ffffff;
+  overflow-y: auto;
+}
+
+/* Sidebar Section Styles */
+.sidebar-section {
+  margin-bottom: 20px;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 16px;
+}
+
+.sidebar-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.section-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #667781;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  padding: 0 16px;
+}
+
+.section-content {
+  padding: 0 16px;
+}
+
+/* Clickable Items */
+.clickable-item {
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clickable-item:hover:not(.inactive) {
+  background: #f5f5f5;
+  border-color: #cccccc;
+}
+
+.clickable-item.active {
+  background: #ff0000;
+  color: white;
+  border-color: #ff0000;
+}
+
+.clickable-item.inactive {
+  color: #999999;
+  cursor: default;
+  font-style: italic;
+  opacity: 0.7;
+}
+
+/* Participant list styling */
+#participants-list p {
+  padding: 8px 12px;
+  margin: 4px 0;
+  border-radius: 6px;
+  cursor: default;
+  font-weight: 500;
+  background-color: #f8f9fa;
+}
+
+#participants-list p:hover {
+  background-color: #f0f0f0;
+}
+
+#participants-list p::before {
+  content: "•";
+  color: #ff0000;
+  font-size: 20px;
+  vertical-align: middle;
+  margin-right: 8px;
+  line-height: 0;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cccccc;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #b3b3b3;
+}
+
+/* Mobile view - SIDEBAR FULLSCREEN */
+@media(max-width:900px) {
+  /* Tombol toggle sidebar mobile */
+  #mobile-sidebar-toggle {
+    display: block;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 1002;
+    background: #ff0000;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  }
+
+  /* Overlay saat sidebar aktif */
+  #mobile-sidebar-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+  }
+
+  /* Sidebar FULLSCREEN seperti WA */
+  #roster {
+    position: fixed;
+    top: 0;
+    left: -100%; /* Sembunyi di luar layar */
+    width: 85%;
+    max-width: 400px;
+    height: 100%;
+    z-index: 1001;
+    transition: left 0.3s ease;
+    box-shadow: 2px 0 12px rgba(0,0,0,0.1);
+    overflow-y: auto;
+    margin: 0;
+    padding-top: 0;
+  }
+
+  /* Saat sidebar aktif di mobile */
+  #roster.show {
+    left: 0;
+  }
+  #roster.show + #mobile-sidebar-overlay {
+    display: block;
+  }
+
+  /* Adjust chat area saat sidebar aktif */
+  #chatlog.with-sidebar {
+    opacity: 0.3;
+    pointer-events: none;
+  }
+
+  /* Default mobile view (sidebar hidden) */
+  #roster:not(.show) { 
+    display: none;
+  }
+  #chatlog { 
+    left: 0; 
+    right: 0;
+    top: 0;
+    bottom: 60px;
+  }
+  
+  /* Sidebar section adjustments for mobile */
+  .sidebar-section {
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+  }
+  
+  .clickable-item {
+    padding: 12px 14px;
+  }
+}
+
+/* Desktop view */
+@media(min-width:901px) {
+  #mobile-sidebar-toggle {
+    display: none;
+  }
+  #mobile-sidebar-overlay {
+    display: none !important;
+  }
+  #roster {
+    display: block !important;
+    left: 0 !important;
+  }
+}
+
+#chat-input {
+  position: fixed;
+  width: 100%;
+  height: 60px;
+  bottom: 0;
+  left: 0;
+  border: none;
+  padding: 0 20px 0 70px;
+  outline: none;
+  font-size: 16px;
+  background-color: #f0f2f5;
+  border-top: 1px solid #e0e0e0;
+  color: #111b21;
+}
+#chatroom::before {
+  z-index: 1;
+  display: block;
+  content: ">";
+  position: fixed;
+  bottom: 0;
+  left: 300px;
+  width: 70px;
+  height: 60px;
+  line-height: 60px;
+  text-align: center;
+  font-weight: bold;
+  font-size: 20px;
+  color: #667781;
+  -webkit-text-stroke-width: 1px;
+  background-color: #f0f2f5;
+  border-top: 1px solid #e0e0e0;
+}
+
+#name-form {
+  position: fixed;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: #f0f2f5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+#name-input {
+  font-size: 24px;
+  padding: 16px 20px;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  width: 400px;
+  max-width: 90%;
+  margin-bottom: 20px;
+  background-color: #ffffff;
+  color: #111b21;
+  text-align: center;
+  transition: border-color 0.2s;
+}
+
+#name-input:focus {
+  border-color: #ff0000;
+  outline: none;
+}
+
+#name-form p {
+  text-align: center;
+  color: #667781;
+  max-width: 600px;
+  line-height: 1.6;
+  font-size: 16px;
+}
+
+#name-form a {
+  color: #ff0000;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+#name-form a:hover {
+  text-decoration: underline;
+}
+
+#room-form {
+  position: fixed;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: #f0f2f5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+#room-form p {
+  color: #111b21;
+  margin: 10px 0;
+  font-weight: 500;
+}
+
+#room-name {
+  font-size: inherit;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  height: 60px;
+  width: 400px;
+  max-width: 90%;
+  padding: 0 20px;
+  margin-bottom: 20px;
+  background-color: #ffffff;
+  color: #111b21;
+  transition: border-color 0.2s;
+}
+
+#room-name:focus {
+  border-color: #ff0000;
+  outline: none;
+}
+
+#room-form button {
+  font-size: 20px;
+  padding: 16px 32px;
+  margin: 10px;
+  border: none;
+  border-radius: 24px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 600;
+}
+
+#go-public {
+  background-color: #ff0000;
+  color: white;
+  width: 180px;
+}
+
+#go-public:hover {
+  background-color: #e60000;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 0, 0, 0.2);
+}
+
+#go-private {
+  background-color: #ffffff;
+  color: #ff0000;
+  border: 2px solid #ff0000 !important;
+  width: 280px;
+}
+
+#go-private:hover {
+  background-color: #fff5f5;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 0, 0, 0.1);
+}
+
+#room-form button:active {
+  transform: translateY(0);
+}
+
+@media(max-width:660px) {
+  #name-input, #room-form { font-size: 20px; }
+  #name-form p { font-size: 14px; }
+  #room-name {
+    height: 50px;
+    width: 300px;
+  }
+  #room-form button {
+    font-size: 18px;
+    padding: 14px 24px;
+  }
+  #go-public { width: 150px; }
+  #go-private { width: 240px; }
+}
+@media(max-width:500px) {
+  #name-input, #room-form { font-size: 18px; }
+  #name-form p { font-size: 13px; }
+  #room-name {
+    height: 48px;
+    width: 280px;
+  }
+  #room-form button {
+    font-size: 16px;
+    padding: 12px 20px;
+  }
+  #go-public { width: 130px; }
+  #go-private { width: 220px; }
+}
+
+/* Fix input field untuk desktop tanpa ubah original Cloudflare */
+@media(min-width:901px) {
+  #chat-input {
+    width: calc(100% - 300px);
+    left: 300px;
+    padding-left: 90px;
+  }
+  #chatroom::before {
+    left: 300px;
+  }
+}
+
+/* Mobile adjustments */
+@media(max-width:900px) {
+  #chat-input {
+    padding-left: 70px;
+  }
+  #chatroom::before {
+    left: 0;
+  }
+}
+
+/* Selection color */
+::selection {
+  background-color: rgba(255, 0, 0, 0.2);
+}
+</style>
+
+<!--===================================================================================-->
+<!-- The actual HTML. There is not much of it. -->
+
+  </head>
+  <body>
+    <!-- Mobile sidebar toggle button -->
+    <button id="mobile-sidebar-toggle" type="button" aria-label="Toggle sidebar">☰</button>
+    <div id="mobile-sidebar-overlay"></div>
+    
+    <!-- Name input form -->
+    <form id="name-form" action="/fake-form-action">
+      <input id="name-input" placeholder="your name">
+      <p>This chat runs entirely on the edge<br>
+        <a href="https://blog.cloudflare.com/introducing-workers-durable-objects" target="_blank">Durable Objects</a></p>
+    </form>
+    
+    <!-- Room selection form -->
+    <form id="room-form" action="/fake-form-action">
+      <p>Public Room:</p>
+      <input id="room-name" placeholder="room name"><button id="go-public">Go &raquo;</button>
+      <p>OR</p>
+      <button id="go-private">Private Room &raquo;</button>
+    </form>
+    
+    <!-- Main chat interface -->
+    <form id="chatroom" action="/fake-form-action">
+      <div id="chatlog">
+        <div id="spacer"></div>
+      </div>
+      
+      <!-- Sidebar with 3-section structure -->
+      <div id="roster">
+        <!-- Section 1: Your Name -->
+        <div class="sidebar-section">
+          <div class="section-header">Your Name</div>
+          <div id="your-name-display" class="section-content">
+            <div id="current-username" class="clickable-item inactive">(not set)</div>
+          </div>
+        </div>
+        
+        <!-- Section 2: Public Room -->
+        <div class="sidebar-section">
+          <div class="section-header">Public Room</div>
+          <div id="public-room-display" class="section-content">
+            <div id="current-public-room" class="clickable-item inactive">(not set)</div>
+          </div>
+        </div>
+        
+        <!-- Section 3: Private Room -->
+        <div class="sidebar-section">
+          <div class="section-header">Private Room</div>
+          <div id="private-room-display" class="section-content">
+            <div id="current-private-room" class="clickable-item inactive">(not set)</div>
+          </div>
+        </div>
+        
+        <!-- Dynamic Participants Section (will be inserted by JavaScript) -->
+        <div id="participants-container"></div>
+      </div>
+      
+      <input id="chat-input" placeholder="Type a message...">
+    </form>
+  </body>
+
+<!--===================================================================================-->
+<!-- Client-side JavaScript code for the app. -->
+
+<script type="text/javascript">
+let currentWebSocket = null;
+
+let nameForm = document.querySelector("#name-form");
+let nameInput = document.querySelector("#name-input");
+let roomForm = document.querySelector("#room-form");
+let roomNameInput = document.querySelector("#room-name");
+let goPublicButton = document.querySelector("#go-public");
+let goPrivateButton = document.querySelector("#go-private");
+let chatroom = document.querySelector("#chatroom");
+let chatlog = document.querySelector("#chatlog");
+let chatInput = document.querySelector("#chat-input");
+let roster = document.querySelector("#roster");
+let mobileSidebarToggle = document.querySelector("#mobile-sidebar-toggle");
+let mobileSidebarOverlay = document.querySelector("#mobile-sidebar-overlay");
+
+// Is the chatlog scrolled to the bottom?
+let isAtBottom = true;
+
+let username;
+let roomname;
+
+let hostname = window.location.host;
+if (hostname == "") {
+  // Probably testing the HTML locally.
+  hostname = "room.soeparnocorp.workers.dev";
+}
+
+// ===== [SIDEBAR 3-SECTION AUTO-POPULATE] =====
+
+// Fungsi untuk update "Your Name" section
+function updateYourNameDisplay(name) {
+  const display = document.getElementById('current-username');
+  if (name && name.length > 0) {
+    display.textContent = name;
+    display.classList.remove('inactive');
+    display.classList.add('active');
+    
+    // Click handler untuk "Your Name"
+    display.onclick = function() {
+      // Edit name functionality
+      const newName = prompt('Change your name:', name);
+      if (newName && newName.length > 0 && newName.length <= 32) {
+        username = newName;
+        updateYourNameDisplay(newName);
+        // Note: Demo original tidak support ganti nama realtime
+      }
+    };
+  } else {
+    display.textContent = '(not set)';
+    display.classList.add('inactive');
+    display.classList.remove('active');
+    display.onclick = null;
+  }
+}
+
+// Fungsi untuk update Public Room section
+function updatePublicRoomDisplay(roomName) {
+  const display = document.getElementById('current-public-room');
+  if (roomName && roomName.length > 0) {
+    display.textContent = roomName;
+    display.classList.remove('inactive');
+    display.classList.add('active');
+    
+    // Click handler untuk Public Room
+    display.onclick = function() {
+      if (roomname !== roomName) {
+        switchToRoom(roomName, false);
+      }
+    };
+  } else {
+    display.textContent = '(not set)';
+    display.classList.add('inactive');
+    display.classList.remove('active');
+    display.onclick = null;
+  }
+}
+
+// Fungsi untuk update Private Room section
+function updatePrivateRoomDisplay(roomSlug) {
+  const display = document.getElementById('current-private-room');
+  if (roomSlug && roomSlug.length > 0) {
+    // Tampilkan hanya 8 karakter pertama untuk readability
+    const displayName = roomSlug.length > 10 ? roomSlug.substring(0, 8) + '...' : roomSlug;
+    display.textContent = displayName;
+    display.title = "Private Room: " + roomSlug; // Full slug di tooltip
+    display.classList.remove('inactive');
+    display.classList.add('active');
+    
+    // Click handler untuk Private Room
+    display.onclick = function() {
+      if (roomname !== roomSlug) {
+        switchToRoom(roomSlug, true);
+      }
+    };
+  } else {
+    display.textContent = '(not set)';
+    display.classList.add('inactive');
+    display.classList.remove('active');
+    display.onclick = null;
+  }
+}
+
+// Fungsi untuk switch room
+function switchToRoom(targetRoomName, isPrivate = false) {
+  // Tutup koneksi lama
+  if (currentWebSocket) {
+    currentWebSocket.close();
+    currentWebSocket = null;
+  }
+  
+  // Update roomname global
+  roomname = targetRoomName;
+  document.location.hash = '#' + targetRoomName;
+  
+  // Update UI display
+  if (isPrivate) {
+    updatePrivateRoomDisplay(targetRoomName);
+    updatePublicRoomDisplay(''); // Clear public room display
+  } else {
+    updatePublicRoomDisplay(targetRoomName);
+    updatePrivateRoomDisplay(''); // Clear private room display
+  }
+  
+  // Clear participant list saat ganti room
+  const participantsContainer = document.getElementById('participants-container');
+  participantsContainer.innerHTML = '';
+  
+  // Close mobile sidebar if open
+  closeMobileSidebar();
+  
+  // Join room baru
+  join();
+}
+
+// ===== [MOBILE SIDEBAR TOGGLE] =====
+function toggleMobileSidebar() {
+  roster.classList.toggle('show');
+  mobileSidebarOverlay.style.display = roster.classList.contains('show') ? 'block' : 'none';
+  chatlog.classList.toggle('with-sidebar');
+}
+
+function closeMobileSidebar() {
+  roster.classList.remove('show');
+  mobileSidebarOverlay.style.display = 'none';
+  chatlog.classList.remove('with-sidebar');
+}
+
+// ===== [PARTICIPANT LIST MANAGEMENT] =====
+function updateParticipantList() {
+  const participantsContainer = document.getElementById('participants-container');
+  const originalParticipants = roster.querySelectorAll('p');
+  
+  if (originalParticipants.length > 0) {
+    // Create participants section if it doesn't exist
+    if (!participantsContainer.querySelector('.sidebar-section')) {
+      const participantSection = document.createElement('div');
+      participantSection.className = 'sidebar-section';
+      participantSection.innerHTML = `
+        <div class="section-header">Participants (${originalParticipants.length})</div>
+        <div class="section-content">
+          <div id="participants-list"></div>
+        </div>
+      `;
+      participantsContainer.appendChild(participantSection);
+    }
+    
+    // Update participants list
+    const participantsList = document.getElementById('participants-list');
+    if (participantsList) {
+      participantsList.innerHTML = '';
+      
+      originalParticipants.forEach(p => {
+        const participantItem = p.cloneNode(true);
+        participantItem.style.cursor = 'default';
+        participantsList.appendChild(participantItem);
+      });
+      
+      // Update participant count
+      const header = participantsContainer.querySelector('.section-header');
+      if (header) {
+        header.textContent = `Participants (${originalParticipants.length})`;
+      }
+    }
+    
+    // Remove original <p> elements from roster
+    originalParticipants.forEach(p => p.remove());
+  } else {
+    // Remove participants section if no participants
+    participantsContainer.innerHTML = '';
+  }
+}
+
+// Observer untuk participant changes
+const participantObserver = new MutationObserver(updateParticipantList);
+participantObserver.observe(roster, { childList: true, subtree: true });
+
+// ===== [ORIGINAL CLOUDFLARE DEMO CODE - MODIFIED] =====
+function startNameChooser() {
+  nameForm.addEventListener("submit", event => {
+    event.preventDefault();
+    username = nameInput.value;
+    if (username.length > 0) {
+      // Update your name display
+      updateYourNameDisplay(username);
+      startRoomChooser();
+    }
+  });
+
+  nameInput.addEventListener("input", event => {
+    const currentName = event.currentTarget.value;
+    // Update display in real-time
+    if (currentName.length > 0) {
+      updateYourNameDisplay(currentName);
+    } else {
+      updateYourNameDisplay('');
+    }
+    
+    // Existing length check
+    if (currentName.length > 32) {
+      event.currentTarget.value = currentName.slice(0, 32);
+    }
+  });
+
+  nameInput.focus();
+}
+
+function startRoomChooser() {
+  nameForm.remove();
+
+  if (document.location.hash.length > 1) {
+    roomname = document.location.hash.slice(1);
+    // Determine if it's a private room (64 hex chars)
+    const isPrivate = roomname.match(/^[0-9a-f]{64}$/);
+    if (isPrivate) {
+      updatePrivateRoomDisplay(roomname);
+    } else {
+      updatePublicRoomDisplay(roomname);
+    }
+    startChat();
+    return;
+  }
+
+  roomForm.addEventListener("submit", event => {
+    event.preventDefault();
+    roomname = roomNameInput.value;
+    if (roomname.length > 0) {
+      updatePublicRoomDisplay(roomname);
+      startChat();
+    }
+  });
+
+  roomNameInput.addEventListener("input", event => {
+    if (event.currentTarget.value.length > 32) {
+      event.currentTarget.value = event.currentTarget.value.slice(0, 32);
+    }
+  });
+
+  goPublicButton.addEventListener("click", event => {
+    roomname = roomNameInput.value;
+    if (roomname.length > 0) {
+      updatePublicRoomDisplay(roomname);
+      startChat();
+    }
+  });
+
+  goPrivateButton.addEventListener("click", async event => {
+    roomNameInput.disabled = true;
+    goPublicButton.disabled = true;
+    event.currentTarget.disabled = true;
+
+    let response = await fetch("https://" + hostname + "/api/room", {method: "POST"});
+    if (!response.ok) {
+      alert("something went wrong");
+      document.location.reload();
+      return;
+    }
+
+    roomname = await response.text();
+    updatePrivateRoomDisplay(roomname);
+    startChat();
+  });
+
+  roomNameInput.focus();
+}
+
+function startChat() {
+  roomForm.remove();
+
+  // Normalize the room name a bit.
+  roomname = roomname.replace(/[^a-zA-Z0-9_-]/g, "").replace(/_/g, "-").toLowerCase();
+
+  if (roomname.length > 32 && !roomname.match(/^[0-9a-f]{64}$/)) {
+    addChatMessage("ERROR", "Invalid room name.");
+    return;
+  }
+
+  document.location.hash = "#" + roomname;
+
+  chatInput.addEventListener("keydown", event => {
+    if (event.keyCode == 38) {
+      // up arrow
+      chatlog.scrollBy(0, -50);
+    } else if (event.keyCode == 40) {
+      // down arrow
+      chatlog.scrollBy(0, 50);
+    } else if (event.keyCode == 33) {
+      // page up
+      chatlog.scrollBy(0, -chatlog.clientHeight + 50);
+    } else if (event.keyCode == 34) {
+      // page down
+      chatlog.scrollBy(0, chatlog.clientHeight - 50);
+    }
+  });
+
+  chatroom.addEventListener("submit", event => {
+    event.preventDefault();
+
+    if (currentWebSocket) {
+      currentWebSocket.send(JSON.stringify({message: chatInput.value}));
+      chatInput.value = "";
+
+      // Scroll to bottom whenever sending a message.
+      chatlog.scrollBy(0, 1e8);
+    }
+  });
+
+  chatInput.addEventListener("input", event => {
+    if (event.currentTarget.value.length > 256) {
+      event.currentTarget.value = event.currentTarget.value.slice(0, 256);
+    }
+  });
+
+  chatlog.addEventListener("scroll", event => {
+    isAtBottom = chatlog.scrollTop + chatlog.clientHeight >= chatlog.scrollHeight;
+  });
+
+  // Mobile sidebar toggle event
+  mobileSidebarToggle.addEventListener("click", toggleMobileSidebar);
+  mobileSidebarOverlay.addEventListener("click", closeMobileSidebar);
+
+  chatInput.focus();
+  document.body.addEventListener("click", event => {
+    // If the user clicked somewhere in the window without selecting any text, focus the chat
+    // input.
+    if (window.getSelection().toString() == "") {
+      chatInput.focus();
+    }
+  });
+
+  // Detect mobile keyboard appearing and disappearing, and adjust the scroll as appropriate.
+  if('visualViewport' in window) {
+    window.visualViewport.addEventListener('resize', function(event) {
+      if (isAtBottom) {
+        chatlog.scrollBy(0, 1e8);
+      }
+    });
+  }
+
+  join();
+}
+
+let lastSeenTimestamp = 0;
+let wroteWelcomeMessages = false;
+
+function join() {
+  // If we are running via wrangler dev, use ws:
+  const wss = document.location.protocol === "http:" ? "ws://" : "wss://";
+  let ws = new WebSocket(wss + hostname + "/api/room/" + roomname + "/websocket");
+  let rejoined = false;
+  let startTime = Date.now();
+
+  let rejoin = async () => {
+    if (!rejoined) {
+      rejoined = true;
+      currentWebSocket = null;
+
+      // Clear the roster.
+      const participantsContainer = document.getElementById('participants-container');
+      participantsContainer.innerHTML = '';
+
+      // Don't try to reconnect too rapidly.
+      let timeSinceLastJoin = Date.now() - startTime;
+      if (timeSinceLastJoin < 10000) {
+        // Less than 10 seconds elapsed since last join. Pause a bit.
+        await new Promise(resolve => setTimeout(resolve, 10000 - timeSinceLastJoin));
+      }
+
+      // OK, reconnect now!
+      join();
+    }
+  }
+
+  ws.addEventListener("open", event => {
+    currentWebSocket = ws;
+
+    // Send user info message.
+    ws.send(JSON.stringify({name: username}));
+  });
+
+  ws.addEventListener("message", event => {
+    let data = JSON.parse(event.data);
+
+    if (data.error) {
+      addChatMessage(null, "* Error: " + data.error);
+    } else if (data.joined) {
+      let p = document.createElement("p");
+      p.innerText = data.joined;
+      roster.appendChild(p);
+    } else if (data.quit) {
+      for (let child of roster.childNodes) {
+        if (child.innerText == data.quit) {
+          roster.removeChild(child);
+          break;
+        }
+      }
+    } else if (data.ready) {
+      // All pre-join messages have been delivered.
+      if (!wroteWelcomeMessages) {
+        wroteWelcomeMessages = true;
+        addChatMessage(null,
+            "* This is a demo app built with Cloudflare Workers Durable Objects. The source code " +
+            "can be found at: https://github.com/cloudflare/workers-chat-demo");
+        addChatMessage(null,
+            "* WARNING: Participants in this chat are random people on the internet. " +
+            "Names are not authenticated; anyone can pretend to be anyone. The people " +
+            "you are chatting with are NOT Cloudflare employees. Chat history is saved.");
+        if (roomname.length == 64) {
+          addChatMessage(null,
+              "* This is a private room. You can invite someone to the room by sending them the URL.");
+        } else {
+          addChatMessage(null,
+              "* Welcome to #" + roomname + ". Say hi!");
+        }
+      }
+    } else {
+      // A regular chat message.
+      if (data.timestamp > lastSeenTimestamp) {
+        addChatMessage(data.name, data.message);
+        lastSeenTimestamp = data.timestamp;
+      }
+    }
+  });
+
+  ws.addEventListener("close", event => {
+    console.log("WebSocket closed, reconnecting:", event.code, event.reason);
+    rejoin();
+  });
+  ws.addEventListener("error", event => {
+    console.log("WebSocket error, reconnecting:", event);
+    rejoin();
+  });
+}
+
+function addChatMessage(name, text) {
+  let p = document.createElement("p");
+  if (name) {
+    let tag = document.createElement("span");
+    tag.className = "username";
+    tag.innerText = name + ": ";
+    p.appendChild(tag);
+  }
+  p.appendChild(document.createTextNode(text));
+
+  // Append the new chat line, making sure that if the chatlog was scrolled to the bottom
+  // before, it remains scrolled to the bottom, and otherwise the scroll position doesn't
+  // change.
+  chatlog.appendChild(p);
+  if (isAtBottom) {
+    chatlog.scrollBy(0, 1e8);
+  }
+}
+
+// Initialize the app
+startNameChooser();
+</script>
+<!--===================================================================================-->
+</html>
