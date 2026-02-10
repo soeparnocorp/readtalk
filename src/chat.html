@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>READTALK Chat</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+            background: #f0f0f0;
+        }
+        
+        #messages {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 400px;
+            overflow-y: scroll;
+            background: white;
+            margin-bottom: 10px;
+        }
+        
+        .message {
+            margin-bottom: 5px;
+        }
+        
+        .message .name {
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .message .text {
+            color: #666;
+        }
+        
+        input, button {
+            padding: 8px;
+            margin: 5px;
+            font-size: 16px;
+        }
+        
+        #nameInput {
+            width: 200px;
+        }
+        
+        #messageInput {
+            width: 300px;
+        }
+        
+        button {
+            background: #007acc;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        /* Simple binding indicator */
+        .binding-status {
+            margin-top: 10px;
+            padding: 5px;
+            background: #e8f4fd;
+            border-left: 4px solid #007acc;
+        }
+    </style>
+</head>
+<body>
+    <h1>READTALK Chat</h1>
+    
+    <div>
+        <input type="text" id="nameInput" placeholder="Your name" maxlength="32">
+        <button onclick="setName()">Set Name</button>
+    </div>
+    
+    <div id="messages"></div>
+    
+    <div>
+        <input type="text" id="messageInput" placeholder="Type a message" maxlength="256" disabled>
+        <button id="sendButton" onclick="sendMessage()" disabled>Send</button>
+    </div>
+    
+    <!-- SIMPLE BINDING STATUS -->
+    <div class="binding-status">
+        <strong>Binding Status:</strong>
+        <span id="bindingStatus">Checking...</span>
+    </div>
+    
+    <!-- SIMPLE ACTIONS untuk testing binding -->
+    <div style="margin-top: 20px;">
+        <button onclick="testBinding()">Test Bindings</button>
+        <button onclick="createRoom()">New Room</button>
+        <button onclick="checkHealth()">Health Check</button>
+    </div>
+    
+    <script>
+        // Tetap sama dengan edge-chat-demo original
+        let ws = null;
+        let userName = localStorage.getItem('readtalk_username') || '';
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            if (userName) {
+                document.getElementById('nameInput').value = userName;
+                document.getElementById('nameInput').disabled = true;
+                document.querySelector('button[onclick="setName()"]').disabled = true;
+            }
+            
+            connectWebSocket();
+            checkBindings(); // HANYA INI YANG DITAMBAH
+        });
+        
+        // WebSocket functions - TETAP SAMA
+        function connectWebSocket() {
+            let room = 'default';
+            let params = new URLSearchParams(window.location.search);
+            if (params.has('room')) {
+                room = params.get('room');
+            }
+            
+            let protocol = window.location.protocol == 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/api/room/${room}/websocket`);
+            
+            ws.onopen = () => {
+                console.log('Connected to room:', room);
+                if (userName) {
+                    ws.send(JSON.stringify({name: userName}));
+                }
+            };
+            
+            ws.onmessage = (event) => {
+                let data = JSON.parse(event.data);
+                
+                if (data.error) {
+                    addMessage('System', data.error);
+                    return;
+                }
+                
+                if (data.ready) {
+                    document.getElementById('messageInput').disabled = false;
+                    document.getElementById('sendButton').disabled = false;
+                    return;
+                }
+                
+                if (data.joined) {
+                    addMessage('System', data.joined + ' joined');
+                    return;
+                }
+                
+                if (data.quit) {
+                    addMessage('System', data.quit + ' left');
+                    return;
+                }
+                
+                addMessage(data.name, data.message);
+            };
+            
+            ws.onclose = () => {
+                console.log('Disconnected');
+                setTimeout(connectWebSocket, 1000);
+            };
+        }
+        
+        // Chat functions - TETAP SAMA
+        function setName() {
+            userName = document.getElementById('nameInput').value.trim();
+            if (!userName) return;
+            
+            localStorage.setItem('readtalk_username', userName);
+            document.getElementById('nameInput').disabled = true;
+            document.querySelector('button[onclick="setName()"]').disabled = true;
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({name: userName}));
+            }
+        }
+        
+        function sendMessage() {
+            let input = document.getElementById('messageInput');
+            let message = input.value.trim();
+            if (!message) return;
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({message: message}));
+                input.value = '';
+            }
+        }
+        
+        function addMessage(name, text) {
+            let messages = document.getElementById('messages');
+            let message = document.createElement('div');
+            message.className = 'message';
+            message.innerHTML = `<span class="name">${name}:</span> <span class="text">${text}</span>`;
+            messages.appendChild(message);
+            messages.scrollTop = messages.scrollHeight;
+        }
+        
+        // ============ HANYA INI YANG DITAMBAH ============
+        
+        // Function untuk cek binding status
+        async function checkBindings() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                
+                let statusText = '';
+                if (data.bindings) {
+                    statusText = Object.entries(data.bindings)
+                        .map(([key, value]) => `${key}: ${value ? '✅' : '❌'}`)
+                        .join(' | ');
+                }
+                
+                document.getElementById('bindingStatus').textContent = statusText || 'All bindings connected';
+                
+            } catch (error) {
+                document.getElementById('bindingStatus').textContent = 'Error checking bindings';
+                console.log('Binding check error:', error);
+            }
+        }
+        
+        // Function untuk test binding
+        async function testBinding() {
+            try {
+                // Test KV
+                const kvTest = await fetch('/api/test-kv').then(r => r.text());
+                addMessage('System', `KV Test: ${kvTest}`);
+                
+                // Refresh binding status
+                checkBindings();
+                
+            } catch (error) {
+                addMessage('System', `Binding test failed: ${error.message}`);
+            }
+        }
+        
+        // Function untuk create new room (log ke KV)
+        async function createRoom() {
+            try {
+                const response = await fetch('/api/room', { method: 'POST' });
+                const roomId = await response.text();
+                
+                addMessage('System', `New room created: ${roomId}`);
+                
+                // Update URL
+                const newUrl = `${window.location.origin}/?room=${roomId}`;
+                window.history.pushState({}, '', newUrl);
+                
+                // Reconnect WebSocket
+                connectWebSocket();
+                
+            } catch (error) {
+                addMessage('System', `Failed to create room: ${error.message}`);
+            }
+        }
+        
+        // Function untuk health check
+        async function checkHealth() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                addMessage('System', `Health: ${data.status}`);
+                
+                // Show binding status
+                if (data.bindings) {
+                    for (const [binding, status] of Object.entries(data.bindings)) {
+                        addMessage('System', `${binding}: ${status ? 'Connected' : 'Not connected'}`);
+                    }
+                }
+                
+            } catch (error) {
+                addMessage('System', `Health check failed: ${error.message}`);
+            }
+        }
+        
+        // ============ END OF ADDITIONS ============
+    </script>
+</body>
+</html>
