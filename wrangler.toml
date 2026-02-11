@@ -30,13 +30,7 @@ bindings = [
 # ============ MIGRATIONS ============
 [[migrations]]
 tag = "v1"
-new_classes = ["ChatRoom", "RateLimiter"]  # GANTI: new_sqlite_classes → new_classes
-
-# ============ RULES ============
-[[rules]]
-type = "Data"
-globs = ["**/*.html"]
-fallthrough = false
+new_classes = ["ChatRoom", "RateLimiter"]
 
 # ============ OBSERVABILITY ============
 [observability]
@@ -61,4 +55,4 @@ port = 8787
 local_protocol = "http"
 
 [build]
-upload.format = "service-worker"  # atau "modules" tergantung setup
+upload.format = "service-worker"
