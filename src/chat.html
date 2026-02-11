@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: #f0f2f5;
+      color: #111b21;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* SATU RUANGAN */
+    #app {
+      display: flex;
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+
+    /* ===== LAYER 1: CONVERSATION + ROSTER ===== */
+    #conversation-list {
+      width: 300px;
+      background: white;
+      border-right: 1px solid #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    .list-header {
+      padding: 16px;
+      background: #ff0000;
+      color: white;
+    }
+    .list-header h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .your-name-card {
+      padding: 20px 16px;
+      border-bottom: 1px solid #e0e0e0;
+      background: #f8f9fa;
+    }
+    .name-label {
+      font-size: 12px;
+      color: #667781;
+      margin-bottom: 4px;
+    }
+    .name-value {
+      font-size: 18px;
+      font-weight: 600;
+      color: #111b21;
+    }
+
+    /* ROSTER - DI DALAM CONVERSATION LIST */
+    .roster-section {
+      padding: 16px;
+      border-bottom: 1px solid #e0e0e0;
+      background: white;
+    }
+    .roster-title {
+      font-size: 13px;
+      color: #667781;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+    #roster {
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    #roster p {
+      padding: 8px 12px;
+      margin: 2px 0;
+      border-radius: 8px;
+      color: #111b21;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+    }
+    #roster p::before {
+      content: "•";
+      color: #ff0000;
+      font-size: 20px;
+      margin-right: 8px;
+    }
+
+    .rooms-section {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+    .room-item {
+      padding: 16px;
+      border-bottom: 1px solid #f0f0f0;
+      cursor: pointer;
+    }
+    .room-item.active {
+      background: #f0f0f0;
+      border-left: 4px solid #ff0000;
+    }
+    .room-name {
+      font-weight: 600;
+      color: #111b21;
+      margin-bottom: 4px;
+    }
+    .room-meta {
+      font-size: 13px;
+      color: #667781;
+    }
+
+    #new-room-btn {
+      width: calc(100% - 32px);
+      margin: 16px;
+      padding: 12px;
+      background: #ff0000;
+      color: white;
+      border: none;
+      border-radius: 24px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* ===== LAYER 2: CHAT ROOM ===== */
+    #chat-room {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background-color: #efeae2;
+      background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z' fill='%23000000' fill-opacity='0.03' fill-rule='evenodd'/%3E%3C/svg%3E");
+      height: 100vh;
+    }
+
+    .chat-header {
+      height: 60px;
+      background: #ff0000;
+      color: white;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      flex-shrink: 0;
+    }
+    .back-btn {
+      background: none;
+      border: none;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      margin-right: 12px;
+      display: none;
+    }
+    .room-title {
+      font-weight: 600;
+      font-size: 17px;
+    }
+
+    #chatlog {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      word-wrap: break-word;
+    }
+
+    /* MESSAGE BUBBLES - tanpa :has */
+    #chatlog p {
+      max-width: 65%;
+      margin: 8px 0;
+      padding: 8px 12px;
+      border-radius: 7.5px;
+      line-height: 1.4;
+      word-wrap: break-word;
+    }
+    
+    /* Sent message - current user */
+    #chatlog .sent-message {
+      background-color: #ff0000;
+      color: white;
+      margin-left: auto;
+      margin-right: 0;
+      border-top-right-radius: 0;
+    }
+    
+    /* Received message - other users */
+    #chatlog .received-message {
+      background-color: #ffffff;
+      color: #111b21;
+      margin-right: auto;
+      margin-left: 0;
+      border-top-left-radius: 0;
+      box-shadow: 0 1px 0.5px rgba(0,0,0,0.05);
+    }
+    
+    /* System message */
+    #chatlog .system-message {
+      background-color: transparent;
+      color: #667781;
+      text-align: center;
+      font-style: italic;
+      max-width: 100%;
+      font-size: 14px;
+    }
+
+    .username {
+      font-weight: 600;
+    }
+    .sent-message .username {
+      color: white;
+    }
+
+    /* CHAT INPUT - AUTO EXPAND */
+    #chat-input-container {
+      background-color: #f0f2f5;
+      border-top: 1px solid #e0e0e0;
+      padding: 12px 20px;
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    #chat-textarea {
+      flex: 1;
+      border: none;
+      background: white;
+      border-radius: 24px;
+      padding: 10px 16px;
+      font-size: 15px;
+      line-height: 1.5;
+      max-height: 120px;
+      resize: none;
+      outline: none;
+      font-family: inherit;
+      border: 1px solid transparent;
+    }
+
+    #chat-textarea:focus {
+      border-color: #ff0000;
+    }
+
+    #chat-textarea:disabled {
+      background-color: #f5f5f5;
+      color: #999;
+    }
+
+    #send-button {
+      background: #ff0000;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 44px;
+      height: 44px;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    #send-button:disabled {
+      background: #cccccc;
+      cursor: not-allowed;
+    }
+
+    /* ===== FORM LAYERS ===== */
+    .form-layer {
+      position: fixed;
+      z-index: 100;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #f0f2f5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .form-input {
+      font-size: 24px;
+      padding: 16px 20px;
+      border: 2px solid #e0e0e0;
+      border-radius: 12px;
+      width: 400px;
+      max-width: 90%;
+      margin-bottom: 20px;
+      background: white;
+      text-align: center;
+    }
+
+    .form-input:focus {
+      border-color: #ff0000;
+      outline: none;
+    }
+
+    .form-button {
+      font-size: 20px;
+      padding: 16px 32px;
+      margin: 10px;
+      border: none;
+      border-radius: 24px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .form-button.primary {
+      background: #ff0000;
+      color: white;
+      width: 180px;
+    }
+
+    .form-button.secondary {
+      background: white;
+      color: #ff0000;
+      border: 2px solid #ff0000 !important;
+      width: 280px;
+    }
+
+    /* ===== DESKTOP: BERSAMAAN, NO BACK BUTTON ===== */
+    @media (min-width: 901px) {
+      #conversation-list {
+        display: flex !important;
+        width: 300px;
+      }
+      #chat-room {
+        display: flex !important;
+        flex: 1;
+      }
+      .back-btn {
+        display: none !important;
+      }
+    }
+
+    /* ===== MOBILE: BERGANTIAN ===== */
+    @media (max-width: 900px) {
+      #conversation-list {
+        display: flex !important;
+        width: 100%;
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 10;
+      }
+      #chat-room {
+        display: none !important;
+        width: 100%;
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 20;
+      }
+      #chat-room.active {
+        display: flex !important;
+      }
+      .back-btn {
+        display: block !important;
+      }
+      
+      .form-input {
+        font-size: 20px;
+        width: 300px;
+      }
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <!-- FORM 1: NAME -->
+  <form id="name-form" class="form-layer">
+    <input id="name-input" class="form-input" placeholder="your name" maxlength="32">
+    <p class="form-text">READTalk PRO - Edge Chat</p>
+  </form>
+
+  <!-- FORM 2: ROOM -->
+  <form id="room-form" class="form-layer" style="display: none;">
+    <p class="form-text">Public Room:</p>
+    <input id="room-name" class="form-input" placeholder="room name" maxlength="32">
+    <button id="go-public" class="form-button primary">Go &raquo;</button>
+    <p class="form-text">OR</p>
+    <button id="go-private" class="form-button secondary">Private Room &raquo;</button>
+  </form>
+
+  <!-- SATU RUANGAN: APP -->
+  <div id="app" style="display: none;">
+    
+    <!-- LAYER 1: CONVERSATION + ROSTER -->
+    <div id="conversation-list">
+      <div class="list-header">
+        <h1>READTalk PRO</h1>
+      </div>
+      
+      <div class="your-name-card">
+        <div class="name-label">You are</div>
+        <div id="display-username" class="name-value">(not set)</div>
+      </div>
+      
+      <!-- ROSTER - DI DALAM LAYER 1 -->
+      <div class="roster-section">
+        <div class="roster-title">Online participants</div>
+        <div id="roster"></div>
+      </div>
+      
+      <div class="rooms-section" id="rooms-container">
+        <div id="default-room-message" style="padding: 40px 20px; text-align: center; color: #667781;">
+          Create your first room to start chatting
+        </div>
+      </div>
+      
+      <button id="new-room-btn">+ New Room</button>
+    </div>
+
+    <!-- LAYER 2: CHAT ROOM - BERSIH, TANPA ROSTER -->
+    <div id="chat-room">
+      <div class="chat-header">
+        <button class="back-btn" id="back-btn">←</button>
+        <div id="chat-room-title" class="room-title">Select a room</div>
+      </div>
+      
+      <div id="chatlog"></div>
+      
+      <div id="chat-input-container">
+        <textarea id="chat-textarea" placeholder="Type a message..." rows="1" maxlength="1024"></textarea>
+        <button id="send-button" disabled>➤</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== GLOBAL STATE =====
+    let currentWebSocket = null;
+    let username = '';
+    let roomname = '';
+    let currentActiveRoom = null;
+    let roomsHistory = [];
+    let lastSeenTimestamp = 0;
+    let wroteWelcomeMessages = false;
+    let isAtBottom = true;
+    
+    let hostname = window.location.hostname;
+    if (hostname === '' || hostname === 'localhost' || hostname.includes('127.0.0.1')) {
+      hostname = 'room.soeparnocorp.workers.dev';
+    }
+
+    // ===== DOM =====
+    const nameForm = document.getElementById('name-form');
+    const nameInput = document.getElementById('name-input');
+    const roomForm = document.getElementById('room-form');
+    const roomNameInput = document.getElementById('room-name');
+    const goPublicButton = document.getElementById('go-public');
+    const goPrivateButton = document.getElementById('go-private');
+    const app = document.getElementById('app');
+    const conversationList = document.getElementById('conversation-list');
+    const chatRoom = document.getElementById('chat-room');
+    const chatlog = document.getElementById('chatlog');
+    const roster = document.getElementById('roster');
+    const chatTextarea = document.getElementById('chat-textarea');
+    const sendButton = document.getElementById('send-button');
+    const backBtn = document.getElementById('back-btn');
+    const chatRoomTitle = document.getElementById('chat-room-title');
+    const displayUsername = document.getElementById('display-username');
+    const roomsContainer = document.getElementById('rooms-container');
+    const defaultRoomMessage = document.getElementById('default-room-message');
+    const newRoomBtn = document.getElementById('new-room-btn');
+
+    // ===== ROOM HISTORY =====
+    function saveRoomToHistory(roomName, isPrivate = false) {
+      roomsHistory = roomsHistory.filter(r => r.name !== roomName);
+      roomsHistory.unshift({ name: roomName, type: isPrivate ? 'private' : 'public', timestamp: Date.now() });
+      renderRoomsList();
+    }
+
+    function renderRoomsList() {
+      if (!roomsContainer) return;
+      if (roomsHistory.length === 0) {
+        defaultRoomMessage.style.display = 'block';
+        roomsContainer.innerHTML = '';
+        roomsContainer.appendChild(defaultRoomMessage);
+        return;
+      }
+      defaultRoomMessage.style.display = 'none';
+      roomsContainer.innerHTML = '';
+      
+      roomsHistory.forEach(room => {
+        const roomItem = document.createElement('div');
+        roomItem.className = 'room-item';
+        if (currentActiveRoom === room.name) roomItem.classList.add('active');
+        roomItem.dataset.room = room.name;
+        roomItem.dataset.type = room.type;
+        
+        const roomName = document.createElement('div');
+        roomName.className = 'room-name';
+        roomName.textContent = room.type === 'private' ? `🔒 ${room.name.substring(0, 8)}...` : `#${room.name}`;
+        
+        const roomMeta = document.createElement('div');
+        roomMeta.className = 'room-meta';
+        roomMeta.textContent = room.type === 'private' ? 'Private room • Click to open' : 'Public room • Click to open';
+        
+        roomItem.appendChild(roomName);
+        roomItem.appendChild(roomMeta);
+        roomsContainer.appendChild(roomItem);
+      });
+    }
+
+    // ===== LAYOUT =====
+    function isDesktop() { return window.innerWidth >= 901; }
+
+    function applyLayout() {
+      if (isDesktop()) {
+        conversationList.style.display = 'flex';
+        chatRoom.style.display = 'flex';
+        chatRoom.classList.remove('active');
+        if (!currentActiveRoom && roomsHistory.length > 0) openChatRoom(roomsHistory[0].name);
+      } else {
+        if (!chatRoom.classList.contains('active')) {
+          conversationList.style.display = 'flex';
+          chatRoom.style.display = 'none';
+        }
+      }
+    }
+
+    function showConversationList() {
+      if (isDesktop()) return;
+      conversationList.style.display = 'flex';
+      chatRoom.style.display = 'none';
+      chatRoom.classList.remove('active');
+      if (currentWebSocket) { currentWebSocket.close(); currentWebSocket = null; }
+    }
+
+    function openChatRoom(roomName) {
+      if (!roomName) return;
+      currentActiveRoom = roomName;
+      roomname = roomName;
+      
+      chatRoomTitle.textContent = roomName.length === 64 ? `🔒 ${roomName.substring(0, 8)}...` : `#${roomName}`;
+      renderRoomsList();
+      
+      while (chatlog.firstChild) chatlog.removeChild(chatlog.firstChild);
+      while (roster.firstChild) roster.removeChild(roster.firstChild);
+      
+      wroteWelcomeMessages = false;
+      lastSeenTimestamp = 0;
+      document.location.hash = '#' + roomName;
+      
+      if (!isDesktop()) {
+        conversationList.style.display = 'none';
+        chatRoom.style.display = 'flex';
+        chatRoom.classList.add('active');
+      }
+      
+      chatTextarea.disabled = false;
+      chatTextarea.focus();
+      if (currentWebSocket) currentWebSocket.close();
+      join();
+    }
+
+    // ===== FORM FLOW =====
+    function startNameChooser() {
+      nameForm.style.display = 'flex';
+      nameForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const val = nameInput.value.trim();
+        if (val) { username = val; displayUsername.textContent = username; startRoomChooser(); }
+      });
+      nameInput.addEventListener('input', (e) => { if (e.target.value.length > 32) e.target.value = e.target.value.slice(0, 32); });
+      nameInput.focus();
+    }
+
+    function startRoomChooser() {
+      nameForm.style.display = 'none';
+      roomForm.style.display = 'flex';
+      
+      if (document.location.hash.length > 1) {
+        const hashRoom = document.location.hash.slice(1);
+        const isPrivate = hashRoom.match(/^[0-9a-f]{64}$/);
+        saveRoomToHistory(hashRoom, isPrivate);
+        app.style.display = 'flex';
+        roomForm.style.display = 'none';
+        applyLayout();
+        openChatRoom(hashRoom);
+        return;
+      }
+      
+      roomForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const val = roomNameInput.value.trim();
+        if (val) { roomname = val; saveRoomToHistory(val, false); app.style.display = 'flex'; roomForm.style.display = 'none'; applyLayout(); openChatRoom(val); }
+      });
+      
+      roomNameInput.addEventListener('input', (e) => { if (e.target.value.length > 32) e.target.value = e.target.value.slice(0, 32); });
+      
+      goPublicButton.addEventListener('click', () => {
+        const val = roomNameInput.value.trim();
+        if (val) { roomname = val; saveRoomToHistory(val, false); app.style.display = 'flex'; roomForm.style.display = 'none'; applyLayout(); openChatRoom(val); }
+      });
+      
+      goPrivateButton.addEventListener('click', async (e) => {
+        roomNameInput.disabled = true; goPublicButton.disabled = true; e.currentTarget.disabled = true;
+        try {
+          const response = await fetch(`https://${hostname}/api/room`, { method: 'POST' });
+          if (!response.ok) throw new Error('Failed');
+          const privateRoom = await response.text();
+          saveRoomToHistory(privateRoom, true);
+          app.style.display = 'flex'; roomForm.style.display = 'none'; applyLayout(); openChatRoom(privateRoom);
+        } catch (error) { alert('Something went wrong: ' + error.message); document.location.reload(); }
+      });
+      
+      roomNameInput.focus();
+    }
+
+    // ===== WEBSOCKET + ROSTER =====
+    function join() {
+      if (!roomname || !username) return;
+      const wsProtocol = document.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${hostname}/api/room/${roomname}/websocket`;
+      
+      let ws = new WebSocket(wsUrl);
+      let rejoined = false;
+      let startTime = Date.now();
+      
+      const rejoin = async () => {
+        if (!rejoined) {
+          rejoined = true;
+          currentWebSocket = null;
+          const elapsed = Date.now() - startTime;
+          if (elapsed < 10000) await new Promise(resolve => setTimeout(resolve, 10000 - elapsed));
+          join();
+        }
+      };
+      
+      ws.addEventListener('open', () => {
+        currentWebSocket = ws;
+        ws.send(JSON.stringify({ name: username }));
+        sendButton.disabled = false;
+      });
+      
+      ws.addEventListener('message', (event) => {
+        const data = JSON.parse(event.data);
+        
+        if (data.joined) {
+          const p = document.createElement('p');
+          p.textContent = data.joined;
+          roster.appendChild(p);
+        } else if (data.quit) {
+          Array.from(roster.childNodes).forEach(child => {
+            if (child.textContent === data.quit) roster.removeChild(child);
+          });
+        } else if (data.error) {
+          addChatMessage(null, `* Error: ${data.error}`, 'system');
+        } else if (data.ready) {
+          if (!wroteWelcomeMessages) {
+            wroteWelcomeMessages = true;
+            addChatMessage(null, '* READTalk PRO - Edge Chat Platform', 'system');
+            addChatMessage(null, '* © 2026 SOEPARNO ENTERPRISE Corp. All Rights Reserved.', 'system');
+            addChatMessage(null, '* WARNING: Participants are random people on the internet. Names are not authenticated.', 'system');
+            if (roomname.length === 64) addChatMessage(null, '* This is a private room. Share the URL to invite others.', 'system');
+            else addChatMessage(null, `* Welcome to #${roomname}. Say hi!`, 'system');
+          }
+        } else if (data.name && data.message) {
+          if (data.timestamp > lastSeenTimestamp) {
+            addChatMessage(data.name, data.message);
+            lastSeenTimestamp = data.timestamp;
+          }
+        }
+      });
+      
+      ws.addEventListener('close', () => { currentWebSocket = null; sendButton.disabled = true; rejoin(); });
+      ws.addEventListener('error', () => { currentWebSocket = null; sendButton.disabled = true; rejoin(); });
+    }
+
+    // ===== CHAT MESSAGES =====
+    function addChatMessage(name, text, type = 'normal') {
+      const p = document.createElement('p');
+      
+      if (type === 'system' || !name) {
+        p.classList.add('system-message');
+        p.textContent = text;
+      } else {
+        if (name === username) p.classList.add('sent-message');
+        else p.classList.add('received-message');
+        
+        const span = document.createElement('span');
+        span.className = 'username';
+        span.textContent = name + ': ';
+        p.appendChild(span);
+        p.appendChild(document.createTextNode(text));
+      }
+      
+      chatlog.appendChild(p);
+      if (isAtBottom) setTimeout(() => { chatlog.scrollTop = chatlog.scrollHeight; }, 10);
+    }
+
+    // ===== CHAT INPUT AUTO-EXPAND =====
+    function setupChatInput() {
+      chatTextarea.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        sendButton.disabled = !this.value.trim() || !currentWebSocket;
+        if (this.value.length > 1024) this.value = this.value.slice(0, 1024);
+      });
+      
+      chatTextarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+      
+      sendButton.addEventListener('click', sendMessage);
+      
+      function sendMessage() {
+        const text = chatTextarea.value.trim();
+        if (text && currentWebSocket) {
+          currentWebSocket.send(JSON.stringify({ message: text }));
+          chatTextarea.value = '';
+          chatTextarea.style.height = 'auto';
+          sendButton.disabled = true;
+          chatlog.scrollTop = chatlog.scrollHeight;
+        }
+      }
+    }
+
+    // ===== EVENT LISTENERS =====
+    function setupEventListeners() {
+      chatlog.addEventListener('scroll', () => {
+        isAtBottom = chatlog.scrollTop + chatlog.clientHeight >= chatlog.scrollHeight - 10;
+      });
+      
+      backBtn.addEventListener('click', () => { if (!isDesktop()) showConversationList(); });
+      
+      roomsContainer.addEventListener('click', (e) => {
+        const roomItem = e.target.closest('.room-item');
+        if (roomItem) openChatRoom(roomItem.dataset.room);
+      });
+      
+      newRoomBtn.addEventListener('click', () => {
+        app.style.display = 'none';
+        roomForm.style.display = 'flex';
+        roomNameInput.value = '';
+        roomNameInput.disabled = false;
+        goPublicButton.disabled = false;
+        goPrivateButton.disabled = false;
+        roomNameInput.focus();
+      });
+      
+      window.addEventListener('resize', () => { applyLayout(); });
+    }
+
+    // ===== INIT =====
+    function init() {
+      startNameChooser();
+      setupChatInput();
+      setupEventListeners();
+      if (document.location.hash.length > 1) {
+        const hashRoom = document.location.hash.slice(1);
+        const isPrivate = hashRoom.match(/^[0-9a-f]{64}$/);
+        saveRoomToHistory(hashRoom, isPrivate);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
