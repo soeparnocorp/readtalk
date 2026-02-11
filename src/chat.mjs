@@ -1,4 +1,4 @@
-import HTML from "./chat.html";
+import HTML from "./public/chat.html";
 
 // Helper untuk error handling
 async function handleErrors(request, func) {
