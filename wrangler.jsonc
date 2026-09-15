@@ -16,11 +16,11 @@
 		"bindings": [
             {
 				"class_name": "AuthorizationDurableObject",
-				"name": "AUTHORIZATION"
+				"name": "AUTHORIZATION_DURABLE_OBJECT"
 			},
 			{
 				"class_name": "ConversationDurableObject",
-				"name": "CONVERSATION"
+				"name": "CONVERSATION_DURABLE_OBJECT"
 			}
 		]
 	},
