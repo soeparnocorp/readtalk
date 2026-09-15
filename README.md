@@ -3,8 +3,7 @@
 ```
 root/
 ├── src/
-│   ├── durable-objects/
-│   │   ├── backup/                      
+│   ├── durable-objects/                            
 │   │   ├── authorization.ts             ← AuthorizationDurableObject
 │   │   └── conversation.ts              ← ConversationDurableObject
 │   ├── types/
@@ -12,8 +11,8 @@ root/
 │   └── index.ts                         ← Entry point Worker (Hono router)
 │
 ├── .gitignore
-├── LICENSE                              ← BSD-3-Clause
-├── README.md                            ← "READTalk Messenger API"
+├── LICENSE                              
+├── README.md                            
 ├── package.json
 ├── pnpm-lock.yaml
 ├── tsconfig.json
