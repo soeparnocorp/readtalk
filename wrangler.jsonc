@@ -16,31 +16,14 @@
 		"bindings": [
             {
 				"class_name": "AuthorizationDurableObject",
-				"name": "AUTHORIZATION_DURABLE_OBJECT"
+				"name": "AUTHORIZATION"
 			},
 			{
 				"class_name": "ConversationDurableObject",
-				"name": "CONVERSATION_DURABLE_OBJECT"
+				"name": "CONVERSATION"
 			}
 		]
 	},
-	"d1_databases": [
-		{
-			"binding": "DATABASE",
-			"database_name": "SERVER_D1",
-			"database_id": "9c6d47de-7136-494a-96aa-3e16648a4880"
-		}
-	],
-	"kv_namespaces": [
-		{
-			"binding": "SESSION_CACHE",
-			"id": "28adfeba46544a3ba55ff7ad47598f99"
-		},
-		{
-			"binding": "FEED_CACHE",
-			"id": "89a0d564abcf402a9f79a8e0c43dd4da"
-		}
-	],
 	"observability": {
 		"enabled": true
 	}
