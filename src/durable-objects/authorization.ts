@@ -27,6 +27,8 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     password TEXT NOT NULL,
                     first_name TEXT NOT NULL,
                     last_name TEXT NOT NULL,
+                    username TEXT UNIQUE,
+                    username_updated_at INTEGER,
                     avatar TEXT,
                     created_at INTEGER DEFAULT (unixepoch())
                 );
@@ -64,65 +66,91 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
     private setupRoutes() {
         this.app.use('*', async (c, next) => {
             const path = new URL(c.req.url).pathname;
-            
-            // Skip CORS for WebSocket routes
+
             if (path === '/ws') {
                 return next();
             }
-            
-            // Apply CORS for other routes
+
             return cors()(c, next);
         });
-        
+
         // ============================================================
         // 🔥 USER ENDPOINTS
         // ============================================================
-        
-        // List all users
+
         this.app.get('/users', async (c) => {
             const users = await this.executeQuery({
-                sql: `SELECT id, email, first_name, last_name, avatar FROM user`,
+                sql: `SELECT id, email, first_name, last_name, username, avatar FROM user`,
                 isRaw: false
             }) as Record<string, SqlStorageValue>[];
-            
+
             return c.json({ success: true, users });
         });
 
-        // Get online users
         this.app.get('/users/online', async (c) => {
             const onlineUserIds = Array.from(this.connections.keys());
-            
+
             if (onlineUserIds.length === 0) {
-                return c.json({ 
-                    success: true, 
-                    onlineUsers: [] 
+                return c.json({
+                    success: true,
+                    onlineUsers: []
                 });
             }
-            
+
             const onlineUsers = await this.executeQuery({
                 sql: `
-                    SELECT id, email, first_name, last_name, avatar 
-                    FROM user 
+                    SELECT id, email, first_name, last_name, username, avatar
+                    FROM user
                     WHERE id IN (${onlineUserIds.map(() => '?').join(',')})
                 `,
                 params: onlineUserIds,
                 isRaw: false
             }) as Record<string, SqlStorageValue>[];
-            
-            return c.json({ 
-                success: true, 
-                onlineUsers 
+
+            return c.json({
+                success: true,
+                onlineUsers
+            });
+        });
+
+        this.app.get('/users/:username', async (c) => {
+            const username = c.req.param('username');
+
+            const [user] = await this.executeQuery({
+                sql: `
+                    SELECT id, email, first_name, last_name, username, avatar
+                    FROM user
+                    WHERE username = ?
+                    LIMIT 1
+                `,
+                params: [username],
+                isRaw: false
+            }) as Record<string, SqlStorageValue>[];
+
+            if (!user) {
+                return c.json({ success: false, error: 'User not found' }, 404);
+            }
+
+            return c.json({
+                success: true,
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    first_name: user.first_name,
+                    last_name: user.last_name,
+                    username: user.username,
+                    avatar: user.avatar
+                }
             });
         });
 
         // ============================================================
         // 🔥 PROFILE ENDPOINTS (GET + PUT)
         // ============================================================
-        
-        // GET /profile — Ambil data user berdasarkan session
+
         this.app.get('/profile', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
-            
+
             const { valid, userId } = await this.validateSession(sessionId);
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
@@ -130,8 +158,8 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
             const [user] = await this.executeQuery({
                 sql: `
-                    SELECT id, email, first_name, last_name, avatar 
-                    FROM user 
+                    SELECT id, email, first_name, last_name, username, username_updated_at, avatar
+                    FROM user
                     WHERE id = ?
                 `,
                 params: [userId],
@@ -142,28 +170,28 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 return c.json({ success: false, error: 'User not found' }, 404);
             }
 
-            return c.json({ 
-                success: true, 
+            return c.json({
+                success: true,
                 user: {
                     id: user.id,
                     email: user.email,
                     first_name: user.first_name,
                     last_name: user.last_name,
+                    username: user.username,
+                    username_updated_at: user.username_updated_at,
                     avatar: user.avatar
                 }
             });
         });
 
-        // PUT /profile — Update first_name, last_name, avatar
         this.app.put('/profile', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
-            const { first_name, last_name, avatar } = await c.req.json();
+            const { first_name, last_name, avatar, username } = await c.req.json();
 
-            // Validasi input
             if (!first_name?.trim() || !last_name?.trim()) {
-                return c.json({ 
-                    success: false, 
-                    error: 'First name and last name are required' 
+                return c.json({
+                    success: false,
+                    error: 'First name and last name are required'
                 }, 400);
             }
 
@@ -172,34 +200,77 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
 
-            // Update user di database DO
+            const [currentUser] = await this.executeQuery({
+                sql: `SELECT username, username_updated_at FROM user WHERE id = ?`,
+                params: [userId],
+                isRaw: false
+            }) as Record<string, SqlStorageValue>[];
+
+            let newUsername = currentUser.username as string | null;
+            let newUsernameUpdatedAt = currentUser.username_updated_at as number | null;
+
+            if (username && username !== currentUser.username) {
+                const usernameRegex = /^[A-Za-z0-9_]{1,14}$/;
+                if (!usernameRegex.test(username)) {
+                    return c.json({
+                        success: false,
+                        error: 'Username must be 1-14 characters, only A-Z, 0-9, and underscore'
+                    }, 400);
+                }
+
+                const now = Math.floor(Date.now() / 1000);
+                const hundredDays = 100 * 24 * 60 * 60;
+                if (currentUser.username_updated_at && (now - (currentUser.username_updated_at as number)) < hundredDays) {
+                    return c.json({
+                        success: false,
+                        error: 'Username can only be changed once every 100 days'
+                    }, 400);
+                }
+
+                const [existing] = await this.executeQuery({
+                    sql: `SELECT 1 FROM user WHERE username = ? AND id != ? LIMIT 1`,
+                    params: [username, userId]
+                }) as Record<string, SqlStorageValue>[];
+
+                if (existing) {
+                    return c.json({
+                        success: false,
+                        error: 'Username already taken'
+                    }, 409);
+                }
+
+                newUsername = username;
+                newUsernameUpdatedAt = now;
+            }
+
             await this.executeQuery({
                 sql: `
-                    UPDATE user 
-                    SET first_name = ?, last_name = ?, avatar = ?
+                    UPDATE user
+                    SET first_name = ?, last_name = ?, avatar = ?, username = ?, username_updated_at = ?
                     WHERE id = ?
                 `,
-                params: [first_name.trim(), last_name.trim(), avatar || null, userId]
+                params: [first_name.trim(), last_name.trim(), avatar || null, newUsername, newUsernameUpdatedAt, userId]
             });
 
-            // Ambil data user terbaru
             const [user] = await this.executeQuery({
                 sql: `
-                    SELECT id, email, first_name, last_name, avatar 
-                    FROM user 
+                    SELECT id, email, first_name, last_name, username, username_updated_at, avatar
+                    FROM user
                     WHERE id = ?
                 `,
                 params: [userId],
                 isRaw: false
             }) as Record<string, SqlStorageValue>[];
 
-            return c.json({ 
-                success: true, 
+            return c.json({
+                success: true,
                 user: {
                     id: user.id,
                     email: user.email,
                     first_name: user.first_name,
                     last_name: user.last_name,
+                    username: user.username,
+                    username_updated_at: user.username_updated_at,
                     avatar: user.avatar
                 }
             });
@@ -209,14 +280,13 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
         // 🔥 AUTH ENDPOINTS (Login, Register, Logout, Session)
         // ============================================================
 
-        // Login route
         this.app.post('/login', async (c) => {
             const { email, password } = await c.req.json();
-            
+
             if (!email || !password) {
-                return c.json({ 
-                    success: false, 
-                    error: 'Email and password are required' 
+                return c.json({
+                    success: false,
+                    error: 'Email and password are required'
                 }, 400);
             }
 
@@ -224,8 +294,8 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
             const [user] = await this.executeQuery({
                 sql: `
-                    SELECT id, email, first_name, last_name, avatar 
-                    FROM user 
+                    SELECT id, email, first_name, last_name, username, avatar
+                    FROM user
                     WHERE email = ? AND password = ?
                     LIMIT 1
                 `,
@@ -234,15 +304,14 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
             }) as Record<string, SqlStorageValue>[];
 
             if (!user) {
-                return c.json({ 
-                    success: false, 
-                    error: 'Invalid email or password' 
+                return c.json({
+                    success: false,
+                    error: 'Invalid email or password'
                 }, 401);
             }
 
-            // Create new session
             const sessionId = crypto.randomUUID();
-            const expiresAt = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60); // 30 days from now
+            const expiresAt = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
 
             await this.executeQuery({
                 sql: `
@@ -252,13 +321,14 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 params: [sessionId, user.id, expiresAt]
             });
 
-            return c.json({ 
-                success: true, 
+            return c.json({
+                success: true,
                 user: {
                     id: user.id,
                     email: user.email,
                     first_name: user.first_name,
                     last_name: user.last_name,
+                    username: user.username,
                     avatar: user.avatar
                 },
                 session: {
@@ -268,58 +338,73 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
             });
         });
 
-        // Register route
         this.app.post('/register', async (c) => {
-            const { email, password, firstName, lastName, avatar } = await c.req.json();
-            
-            // Validate required fields
-            if (!email || !password || !firstName || !lastName) {
-                return c.json({ 
-                    success: false, 
-                    error: 'Email, password, first name, and last name are required' 
+            const { email, password, firstName, lastName, username, avatar } = await c.req.json();
+
+            if (!email || !password || !firstName || !lastName || !username) {
+                return c.json({
+                    success: false,
+                    error: 'Email, password, first name, last name, and username are required'
+                }, 400);
+            }
+
+            const usernameRegex = /^[A-Za-z0-9_]{1,14}$/;
+            if (!usernameRegex.test(username)) {
+                return c.json({
+                    success: false,
+                    error: 'Username must be 1-14 characters, only A-Z, 0-9, and underscore'
                 }, 400);
             }
 
             try {
-                // Check if email already exists
-                const [existingUser] = await this.executeQuery({
+                const [existingEmail] = await this.executeQuery({
                     sql: 'SELECT 1 FROM user WHERE email = ? LIMIT 1',
                     params: [email]
                 }) as Record<string, SqlStorageValue>[];
 
-                if (existingUser) {
-                    return c.json({ 
-                        success: false, 
-                        error: 'Email already registered' 
+                if (existingEmail) {
+                    return c.json({
+                        success: false,
+                        error: 'Email already registered'
+                    }, 409);
+                }
+
+                const [existingUsername] = await this.executeQuery({
+                    sql: 'SELECT 1 FROM user WHERE username = ? LIMIT 1',
+                    params: [username]
+                }) as Record<string, SqlStorageValue>[];
+
+                if (existingUsername) {
+                    return c.json({
+                        success: false,
+                        error: 'Username already taken'
                     }, 409);
                 }
 
                 const hashedPassword = await this.hashPassword(password);
                 const userId = crypto.randomUUID();
+                const now = Math.floor(Date.now() / 1000);
 
-                // Create new user
                 await this.executeQuery({
                     sql: `
-                        INSERT INTO user (id, email, password, first_name, last_name, avatar)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO user (id, email, password, first_name, last_name, username, username_updated_at, avatar)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     `,
-                    params: [userId, email, hashedPassword, firstName, lastName, avatar || null]
+                    params: [userId, email, hashedPassword, firstName, lastName, username, now, avatar || null]
                 });
 
-                // Fetch the created user
                 const [user] = await this.executeQuery({
                     sql: `
-                        SELECT id, email, first_name, last_name, avatar 
-                        FROM user 
+                        SELECT id, email, first_name, last_name, username, avatar
+                        FROM user
                         WHERE id = ?
                     `,
                     params: [userId],
                     isRaw: false
                 }) as Record<string, SqlStorageValue>[];
 
-                // Create new session
                 const sessionId = crypto.randomUUID();
-                const expiresAt = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60); // 30 days from now
+                const expiresAt = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
 
                 await this.executeQuery({
                     sql: `
@@ -329,13 +414,14 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     params: [sessionId, userId, expiresAt]
                 });
 
-                return c.json({ 
-                    success: true, 
+                return c.json({
+                    success: true,
                     user: {
                         id: user.id,
                         email: user.email,
                         first_name: user.first_name,
                         last_name: user.last_name,
+                        username: user.username,
                         avatar: user.avatar
                     },
                     session: {
@@ -345,20 +431,19 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 });
             } catch (error) {
                 console.error('Registration error:', error);
-                return c.json({ 
-                    success: false, 
-                    error: 'Failed to create user' 
+                return c.json({
+                    success: false,
+                    error: 'Failed to create user'
                 }, 500);
             }
         });
 
-        // Session validation endpoint
         this.app.get('/session/:sessionId', async (c) => {
             const sessionId = c.req.param('sessionId');
-            
+
             const [session] = await this.executeQuery({
                 sql: `
-                    SELECT s.*, u.email, u.first_name, u.last_name, u.avatar
+                    SELECT s.*, u.email, u.first_name, u.last_name, u.username, u.avatar
                     FROM session s
                     JOIN user u ON s.user_id = u.id
                     WHERE s.id = ? AND s.expires_at > unixepoch()
@@ -369,14 +454,14 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
             }) as Record<string, SqlStorageValue>[];
 
             if (!session) {
-                return c.json({ 
-                    success: false, 
-                    error: 'Invalid or expired session' 
+                return c.json({
+                    success: false,
+                    error: 'Invalid or expired session'
                 }, 401);
             }
 
-            return c.json({ 
-                success: true, 
+            return c.json({
+                success: true,
                 session: {
                     id: session.id,
                     expires_at: session.expires_at
@@ -386,33 +471,31 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     email: session.email,
                     first_name: session.first_name,
                     last_name: session.last_name,
+                    username: session.username,
                     avatar: session.avatar
                 }
             });
         });
 
-        // Logout route
         this.app.post('/logout', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
-            
+
             if (!sessionId) {
-                return c.json({ 
-                    success: false, 
-                    error: 'Session ID is required' 
+                return c.json({
+                    success: false,
+                    error: 'Session ID is required'
                 }, 400);
             }
 
-            // Update the session to expire immediately
             await this.executeQuery({
                 sql: `
-                    UPDATE session 
+                    UPDATE session
                     SET expires_at = unixepoch()
                     WHERE id = ?
                 `,
                 params: [sessionId]
             });
 
-            // Get user ID from session to remove WebSocket connection if exists
             const [session] = await this.executeQuery({
                 sql: `SELECT user_id FROM session WHERE id = ?`,
                 params: [sessionId]
@@ -421,7 +504,7 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
             if (session?.user_id) {
                 const userId = session.user_id as string;
                 const connection = this.connections.get(userId);
-                
+
                 if (connection) {
                     connection.close(1000, 'Logged out');
                     this.connections.delete(userId);
@@ -429,8 +512,8 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 }
             }
 
-            return c.json({ 
-                success: true 
+            return c.json({
+                success: true
             });
         });
 
@@ -438,18 +521,17 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
         // 🔥 CHANNEL ENDPOINTS
         // ============================================================
 
-        // Get list of channels for current user
         this.app.get('/channels', async (c) => {
             const sessionId = c.req.header('X-Session-Id') || '';
             const { valid, userId } = await this.validateSession(sessionId);
-            
+
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
 
             const channels = await this.executeQuery({
                 sql: `
-                    SELECT 
+                    SELECT
                         c.*,
                         COUNT(DISTINCT cu2.user_id) as member_count,
                         GROUP_CONCAT(cu2.user_id) as member_ids
@@ -462,47 +544,43 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 `,
                 params: [userId]
             }) as Record<string, SqlStorageValue>[];
-            
+
             const channelsWithMemberArray = channels.map(channel => ({
                 ...channel,
                 member_ids: channel.member_ids ? (channel.member_ids as string).split(',') : []
             }));
-            
+
             return c.json({ success: true, channels: channelsWithMemberArray });
         });
 
-        // Create new channel
         this.app.post('/channels', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
 
-            // Verify there at least exists a sessionId otherwise access is not granted
             if (!sessionId) {
-                return c.json({ 
-                    success: false, 
-                    error: 'No session for this user exists' 
+                return c.json({
+                    success: false,
+                    error: 'No session for this user exists'
                 }, 500);
             }
 
             const { valid, userId } = await this.validateSession(sessionId);
-            
+
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
 
             const { name, description, is_private, member_ids } = await c.req.json();
-            
-            // Validate required fields
+
             if (!name?.trim()) {
-                return c.json({ 
-                    success: false, 
-                    error: 'Channel name is required' 
+                return c.json({
+                    success: false,
+                    error: 'Channel name is required'
                 }, 400);
             }
 
             try {
                 const channelId = crypto.randomUUID();
 
-                // Create the channel
                 await this.executeQuery({
                     sql: `
                         INSERT INTO channel (id, name, description, is_private)
@@ -511,7 +589,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     params: [channelId, name, description || null, is_private ? 1 : 0]
                 });
 
-                // Add the creator as a member
                 await this.executeQuery({
                     sql: `
                         INSERT INTO channel_user (id, channel_id, user_id)
@@ -520,12 +597,11 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     params: [crypto.randomUUID(), channelId, userId]
                 });
 
-                // Add other members if provided
                 if (member_ids && Array.isArray(member_ids) && member_ids.length > 0) {
                     const memberValues = member_ids
-                        .filter(memberId => memberId !== userId) // Skip creator as they're already added
+                        .filter(memberId => memberId !== userId)
                         .map(memberId => `(?, ?, ?)`).join(',');
-                    
+
                     const memberParams = member_ids
                         .filter(memberId => memberId !== userId)
                         .flatMap(memberId => [
@@ -545,10 +621,9 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     }
                 }
 
-                // Fetch the created channel with member count and member IDs
                 const [channel] = await this.executeQuery({
                     sql: `
-                        SELECT 
+                        SELECT
                             c.*,
                             COUNT(DISTINCT cu2.user_id) as member_count,
                             GROUP_CONCAT(cu2.user_id) as member_ids
@@ -561,13 +636,11 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     isRaw: false
                 }) as Record<string, SqlStorageValue>[];
 
-                // Format the response
                 const formattedChannel = {
                     ...channel,
                     member_ids: channel.member_ids ? (channel.member_ids as string).split(',') : []
                 };
 
-                // Notify all members about the new channel
                 for (const memberId of formattedChannel.member_ids) {
                     const connection = this.connections.get(memberId as string);
                     if (connection && connection.readyState === 1) {
@@ -586,32 +659,30 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     }
                 }
 
-                return c.json({ 
-                    success: true, 
+                return c.json({
+                    success: true,
                     channel: formattedChannel
                 });
 
             } catch (error) {
                 console.error('Channel creation error:', error);
-                return c.json({ 
-                    success: false, 
-                    error: 'Failed to create channel' 
+                return c.json({
+                    success: false,
+                    error: 'Failed to create channel'
                 }, 500);
             }
         });
 
-        // Invite users to channel
         this.app.post('/channels/:channelId/invite', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
             const channelId = c.req.param('channelId');
             const { userIds } = await c.req.json();
-            
+
             const { valid, userId } = await this.validateSession(sessionId);
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
 
-            // Verify the inviter is a member of the channel
             const [membership] = await this.executeQuery({
                 sql: `SELECT 1 FROM channel_user WHERE channel_id = ? AND user_id = ?`,
                 params: [channelId, userId]
@@ -622,7 +693,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
             }
 
             try {
-                // Add new members
                 const memberValues = userIds.map(() => `(?, ?, ?)`).join(',');
                 const memberParams = userIds.flatMap(userId => [
                     crypto.randomUUID(),
@@ -638,10 +708,9 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     params: memberParams
                 });
 
-                // Fetch updated channel info
                 const [channel] = await this.executeQuery({
                     sql: `
-                        SELECT 
+                        SELECT
                             c.*,
                             COUNT(DISTINCT cu2.user_id) as member_count,
                             GROUP_CONCAT(cu2.user_id) as member_ids
@@ -659,7 +728,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     member_ids: channel.member_ids ? (channel.member_ids as string).split(',') : []
                 };
 
-                // Notify all members about the channel update
                 for (const memberId of formattedChannel.member_ids) {
                     const connection = this.connections.get(memberId as string);
                     if (connection && connection.readyState === 1) {
@@ -678,67 +746,62 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     }
                 }
 
-                return c.json({ 
-                    success: true, 
+                return c.json({
+                    success: true,
                     channel: formattedChannel
                 });
 
             } catch (error) {
                 console.error('Channel invite error:', error);
-                return c.json({ 
-                    success: false, 
-                    error: 'Failed to invite users to channel' 
+                return c.json({
+                    success: false,
+                    error: 'Failed to invite users to channel'
                 }, 500);
             }
         });
 
-        // Leave channel
         this.app.post('/channels/:channelId/leave', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
             const channelId = c.req.param('channelId');
-            
+
             const { valid, userId } = await this.validateSession(sessionId);
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
 
             try {
-                // Remove user from channel
                 await this.executeQuery({
                     sql: `
-                        DELETE FROM channel_user 
+                        DELETE FROM channel_user
                         WHERE channel_id = ? AND user_id = ?
                     `,
                     params: [channelId, userId]
                 });
 
-                // Check if channel is now empty
                 const [memberCount] = await this.executeQuery({
                     sql: `
-                        SELECT COUNT(*) as count 
-                        FROM channel_user 
+                        SELECT COUNT(*) as count
+                        FROM channel_user
                         WHERE channel_id = ?
                     `,
                     params: [channelId]
                 }) as Record<string, SqlStorageValue>[];
 
-                // If channel is empty, delete it
                 if (memberCount.count === 0) {
                     await this.executeQuery({
                         sql: `DELETE FROM channel WHERE id = ?`,
                         params: [channelId]
                     });
 
-                    return c.json({ 
-                        success: true, 
-                        deleted: true 
+                    return c.json({
+                        success: true,
+                        deleted: true
                     });
                 }
 
-                // Fetch updated channel info
                 const [channel] = await this.executeQuery({
                     sql: `
-                        SELECT 
+                        SELECT
                             c.*,
                             COUNT(DISTINCT cu2.user_id) as member_count,
                             GROUP_CONCAT(cu2.user_id) as member_ids
@@ -756,7 +819,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     member_ids: channel.member_ids ? (channel.member_ids as string).split(',') : []
                 };
 
-                // Notify remaining members about the update
                 for (const memberId of formattedChannel.member_ids) {
                     const connection = this.connections.get(memberId as string);
                     if (connection && connection.readyState === 1) {
@@ -775,7 +837,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     }
                 }
 
-                // Notify the leaving user
                 const leavingUserConnection = this.connections.get(userId);
                 if (leavingUserConnection && leavingUserConnection.readyState === 1) {
                     try {
@@ -792,30 +853,26 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     }
                 }
 
-                return c.json({ 
-                    success: true, 
+                return c.json({
+                    success: true,
                     deleted: false,
                     channel: formattedChannel
                 });
 
             } catch (error) {
                 console.error('Channel leave error:', error);
-                return c.json({ 
-                    success: false, 
-                    error: 'Failed to leave channel' 
+                return c.json({
+                    success: false,
+                    error: 'Failed to leave channel'
                 }, 500);
             }
         });
     }
 
-    // ============================================================
-    // 🔥 WEBSOCKET & PRESENCE
-    // ============================================================
-
     public async clientConnected(sessionId?: string) {
         const webSocketPair = new WebSocketPair()
         const [client, server] = Object.values(webSocketPair)
-        
+
         if (!sessionId) {
             server.close(1008, 'Session ID is required')
             return new Response('Session ID is required', { status: 400 })
@@ -840,13 +897,10 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
         const userId = session.user_id as string;
 
-        // Store the server-side socket with the user ID as the key
         this.connections.set(userId, server)
 
-        // Notify other clients about the new connection
         await this.broadcastUserPresence(userId, true);
 
-        // Accept and configure the WebSocket
         server.accept()
 
         server.addEventListener('message', async (msg) => {
@@ -873,7 +927,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
             userId
         });
 
-        // Broadcast to all connected clients except the user who triggered the event
         for (const [connectedUserId, socket] of this.connections.entries()) {
             if (connectedUserId !== userId && socket.readyState === 1) {
                 try {
@@ -908,10 +961,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
             this.connections.delete(wsSessionId)
         }
     }
-
-    // ============================================================
-    // 🔥 FETCH & UTILITY
-    // ============================================================
 
     async fetch(request: Request): Promise<Response> {
         const url = new URL(request.url)
@@ -990,7 +1039,7 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
         for (const { user_id } of users) {
             const userSocket = this.connections.get(user_id);
-            
+
             if (userSocket && userSocket.readyState === 1) {
                 try {
                     userSocket.send(notification);
@@ -1036,9 +1085,9 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
             return { valid: false };
         }
 
-        return { 
-            valid: true, 
-            userId: session.user_id as string 
+        return {
+            valid: true,
+            userId: session.user_id as string
         };
     }
 
@@ -1051,7 +1100,7 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
         if (!valid || !userId) {
             return false;
         }
-        
+
         const access = await this.executeQuery({
             sql: `
                 SELECT 1
@@ -1061,7 +1110,7 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
             `,
             params: [channelId, userId]
         }) as Record<string, SqlStorageValue>[];
-        
+
         return access.length > 0;
     }
 }
