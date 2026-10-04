@@ -30,6 +30,8 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     username TEXT UNIQUE,
                     username_updated_at INTEGER,
                     avatar TEXT,
+                    bio TEXT,
+                    socials TEXT,
                     created_at INTEGER DEFAULT (unixepoch())
                 );
 
@@ -118,7 +120,7 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
             const [user] = await this.executeQuery({
                 sql: `
-                    SELECT id, email, first_name, last_name, username, avatar
+                    SELECT id, email, first_name, last_name, username, avatar, bio, socials
                     FROM user
                     WHERE username = ?
                     LIMIT 1
@@ -131,6 +133,15 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 return c.json({ success: false, error: 'User not found' }, 404);
             }
 
+            let socials: Record<string, string> | null = null;
+            if (user.socials) {
+                try {
+                    socials = JSON.parse(user.socials as string);
+                } catch {
+                    socials = null;
+                }
+            }
+
             return c.json({
                 success: true,
                 user: {
@@ -139,7 +150,9 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     first_name: user.first_name,
                     last_name: user.last_name,
                     username: user.username,
-                    avatar: user.avatar
+                    avatar: user.avatar,
+                    bio: user.bio,
+                    socials
                 }
             });
         });
@@ -158,7 +171,7 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
             const [user] = await this.executeQuery({
                 sql: `
-                    SELECT id, email, first_name, last_name, username, username_updated_at, avatar
+                    SELECT id, email, first_name, last_name, username, username_updated_at, avatar, bio, socials
                     FROM user
                     WHERE id = ?
                 `,
@@ -170,6 +183,15 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 return c.json({ success: false, error: 'User not found' }, 404);
             }
 
+            let socials: Record<string, string> | null = null;
+            if (user.socials) {
+                try {
+                    socials = JSON.parse(user.socials as string);
+                } catch {
+                    socials = null;
+                }
+            }
+
             return c.json({
                 success: true,
                 user: {
@@ -179,19 +201,28 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     last_name: user.last_name,
                     username: user.username,
                     username_updated_at: user.username_updated_at,
-                    avatar: user.avatar
+                    avatar: user.avatar,
+                    bio: user.bio,
+                    socials
                 }
             });
         });
 
         this.app.put('/profile', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
-            const { first_name, last_name, avatar, username } = await c.req.json();
+            const { first_name, last_name, avatar, username, bio, socials } = await c.req.json();
 
             if (!first_name?.trim() || !last_name?.trim()) {
                 return c.json({
                     success: false,
                     error: 'First name and last name are required'
+                }, 400);
+            }
+
+            if (bio && bio.length > 140) {
+                return c.json({
+                    success: false,
+                    error: 'Bio must be 140 characters or less'
                 }, 400);
             }
 
@@ -243,24 +274,35 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 newUsernameUpdatedAt = now;
             }
 
+            const socialsJson = socials ? JSON.stringify(socials) : null;
+
             await this.executeQuery({
                 sql: `
                     UPDATE user
-                    SET first_name = ?, last_name = ?, avatar = ?, username = ?, username_updated_at = ?
+                    SET first_name = ?, last_name = ?, avatar = ?, username = ?, username_updated_at = ?, bio = ?, socials = ?
                     WHERE id = ?
                 `,
-                params: [first_name.trim(), last_name.trim(), avatar || null, newUsername, newUsernameUpdatedAt, userId]
+                params: [first_name.trim(), last_name.trim(), avatar || null, newUsername, newUsernameUpdatedAt, bio || null, socialsJson, userId]
             });
 
             const [user] = await this.executeQuery({
                 sql: `
-                    SELECT id, email, first_name, last_name, username, username_updated_at, avatar
+                    SELECT id, email, first_name, last_name, username, username_updated_at, avatar, bio, socials
                     FROM user
                     WHERE id = ?
                 `,
                 params: [userId],
                 isRaw: false
             }) as Record<string, SqlStorageValue>[];
+
+            let parsedSocials: Record<string, string> | null = null;
+            if (user.socials) {
+                try {
+                    parsedSocials = JSON.parse(user.socials as string);
+                } catch {
+                    parsedSocials = null;
+                }
+            }
 
             return c.json({
                 success: true,
@@ -271,7 +313,9 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     last_name: user.last_name,
                     username: user.username,
                     username_updated_at: user.username_updated_at,
-                    avatar: user.avatar
+                    avatar: user.avatar,
+                    bio: user.bio,
+                    socials: parsedSocials
                 }
             });
         });
@@ -998,9 +1042,9 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
     }
 
     public async executeQuery<T extends Record<string, SqlStorageValue>>(opts: {
-        sql: string
-        params?: unknown[]
-        isRaw?: boolean
+        sql: string;
+        params?: unknown[];
+        isRaw?: boolean;
     }): Promise<T[] | { columns: string[]; rows: SqlStorageValue[][]; meta: { rows_read: number; rows_written: number } }> {
         const cursor = await this.executeRawQuery<T>(opts)
 
