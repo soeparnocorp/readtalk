@@ -338,7 +338,7 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
             const [user] = await this.executeQuery({
                 sql: `
-                    SELECT id, email, first_name, last_name, username, avatar
+                    SELECT id, email, first_name, last_name, username, username_updated_at, avatar, bio, socials
                     FROM user
                     WHERE email = ? AND password = ?
                     LIMIT 1
@@ -365,6 +365,15 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 params: [sessionId, user.id, expiresAt]
             });
 
+            let parsedSocials: Record<string, string> | null = null;
+            if (user.socials) {
+                try {
+                    parsedSocials = JSON.parse(user.socials as string);
+                } catch {
+                    parsedSocials = null;
+                }
+            }
+
             return c.json({
                 success: true,
                 user: {
@@ -373,7 +382,10 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     first_name: user.first_name,
                     last_name: user.last_name,
                     username: user.username,
-                    avatar: user.avatar
+                    username_updated_at: user.username_updated_at,
+                    avatar: user.avatar,
+                    bio: user.bio,
+                    socials: parsedSocials
                 },
                 session: {
                     id: sessionId,
@@ -439,7 +451,7 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
                 const [user] = await this.executeQuery({
                     sql: `
-                        SELECT id, email, first_name, last_name, username, avatar
+                        SELECT id, email, first_name, last_name, username, username_updated_at, avatar, bio, socials
                         FROM user
                         WHERE id = ?
                     `,
@@ -458,6 +470,15 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     params: [sessionId, userId, expiresAt]
                 });
 
+                let parsedSocials: Record<string, string> | null = null;
+                if (user.socials) {
+                    try {
+                        parsedSocials = JSON.parse(user.socials as string);
+                    } catch {
+                        parsedSocials = null;
+                    }
+                }
+
                 return c.json({
                     success: true,
                     user: {
@@ -466,7 +487,10 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                         first_name: user.first_name,
                         last_name: user.last_name,
                         username: user.username,
-                        avatar: user.avatar
+                        username_updated_at: user.username_updated_at,
+                        avatar: user.avatar,
+                        bio: user.bio,
+                        socials: parsedSocials
                     },
                     session: {
                         id: sessionId,
@@ -487,7 +511,7 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
             const [session] = await this.executeQuery({
                 sql: `
-                    SELECT s.*, u.email, u.first_name, u.last_name, u.username, u.avatar
+                    SELECT s.*, u.email, u.first_name, u.last_name, u.username, u.username_updated_at, u.avatar, u.bio, u.socials
                     FROM session s
                     JOIN user u ON s.user_id = u.id
                     WHERE s.id = ? AND s.expires_at > unixepoch()
@@ -504,6 +528,15 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 }, 401);
             }
 
+            let parsedSocials: Record<string, string> | null = null;
+            if (session.socials) {
+                try {
+                    parsedSocials = JSON.parse(session.socials as string);
+                } catch {
+                    parsedSocials = null;
+                }
+            }
+
             return c.json({
                 success: true,
                 session: {
@@ -516,7 +549,10 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     first_name: session.first_name,
                     last_name: session.last_name,
                     username: session.username,
-                    avatar: session.avatar
+                    username_updated_at: session.username_updated_at,
+                    avatar: session.avatar,
+                    bio: session.bio,
+                    socials: parsedSocials
                 }
             });
         });
