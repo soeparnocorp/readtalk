@@ -76,17 +76,28 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
             return cors()(c, next);
         });
 
-        // ============================================================
-        // 🔥 USER ENDPOINTS
-        // ============================================================
-
         this.app.get('/users', async (c) => {
             const users = await this.executeQuery({
-                sql: `SELECT id, email, first_name, last_name, username, avatar FROM user`,
+                sql: `SELECT id, email, first_name, last_name, username, avatar, bio, socials FROM user`,
                 isRaw: false
             }) as Record<string, SqlStorageValue>[];
 
-            return c.json({ success: true, users });
+            const usersWithParsedSocials = users.map(user => {
+                let socials: Record<string, string> | null = null;
+                if (user.socials) {
+                    try {
+                        socials = JSON.parse(user.socials as string);
+                    } catch {
+                        socials = null;
+                    }
+                }
+                return {
+                    ...user,
+                    socials
+                };
+            });
+
+            return c.json({ success: true, users: usersWithParsedSocials });
         });
 
         this.app.get('/users/online', async (c) => {
@@ -101,7 +112,7 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
             const onlineUsers = await this.executeQuery({
                 sql: `
-                    SELECT id, email, first_name, last_name, username, avatar
+                    SELECT id, email, first_name, last_name, username, avatar, bio, socials
                     FROM user
                     WHERE id IN (${onlineUserIds.map(() => '?').join(',')})
                 `,
@@ -109,9 +120,24 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 isRaw: false
             }) as Record<string, SqlStorageValue>[];
 
+            const onlineUsersWithParsedSocials = onlineUsers.map(user => {
+                let socials: Record<string, string> | null = null;
+                if (user.socials) {
+                    try {
+                        socials = JSON.parse(user.socials as string);
+                    } catch {
+                        socials = null;
+                    }
+                }
+                return {
+                    ...user,
+                    socials
+                };
+            });
+
             return c.json({
                 success: true,
-                onlineUsers
+                onlineUsers: onlineUsersWithParsedSocials
             });
         });
 
@@ -156,10 +182,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 }
             });
         });
-
-        // ============================================================
-        // 🔥 PROFILE ENDPOINTS (GET + PUT)
-        // ============================================================
 
         this.app.get('/profile', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
@@ -319,10 +341,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 }
             });
         });
-
-        // ============================================================
-        // 🔥 AUTH ENDPOINTS (Login, Register, Logout, Session)
-        // ============================================================
 
         this.app.post('/login', async (c) => {
             const { email, password } = await c.req.json();
@@ -596,10 +614,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 success: true
             });
         });
-
-        // ============================================================
-        // 🔥 CHANNEL ENDPOINTS
-        // ============================================================
 
         this.app.get('/channels', async (c) => {
             const sessionId = c.req.header('X-Session-Id') || '';
@@ -1024,7 +1038,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
     async webSocketMessage(ws: WebSocket, message: any) {
         const { sql, params, action } = JSON.parse(message)
-        // TODO: Implement WebSocket message handling
     }
 
     async webSocketClose(
