@@ -40,6 +40,9 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     name TEXT NOT NULL,
                     description TEXT,
                     is_private INTEGER DEFAULT 0,
+                    admin_ids TEXT,
+                    invite_policy TEXT DEFAULT 'admin',
+                    avatar TEXT,
                     created_at INTEGER DEFAULT (unixepoch())
                 );
 
@@ -63,6 +66,83 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
         });
 
         this.setupRoutes();
+    }
+
+    private async getChannelWithMembers(channelId: string) {
+        const [channel] = await this.executeQuery({
+            sql: `
+                SELECT
+                    c.*,
+                    COUNT(DISTINCT cu2.user_id) as member_count,
+                    GROUP_CONCAT(cu2.user_id) as member_ids
+                FROM channel c
+                LEFT JOIN channel_user cu2 ON c.id = cu2.channel_id
+                WHERE c.id = ?
+                GROUP BY c.id
+            `,
+            params: [channelId],
+            isRaw: false
+        }) as Record<string, SqlStorageValue>[];
+
+        if (!channel) return null;
+
+        let adminIds: string[] = [];
+        if (channel.admin_ids) {
+            try {
+                adminIds = JSON.parse(channel.admin_ids as string);
+            } catch {
+                adminIds = [];
+            }
+        }
+
+        return {
+            ...channel,
+            member_ids: channel.member_ids ? (channel.member_ids as string).split(',') : [],
+            admin_ids: adminIds
+        };
+    }
+
+    private async isAdmin(channelId: string, userId: string): Promise<boolean> {
+        const [channel] = await this.executeQuery({
+            sql: `SELECT admin_ids FROM channel WHERE id = ?`,
+            params: [channelId],
+            isRaw: false
+        }) as Record<string, SqlStorageValue>[];
+
+        if (!channel || !channel.admin_ids) return false;
+
+        try {
+            const adminIds = JSON.parse(channel.admin_ids as string) as string[];
+            return adminIds.includes(userId);
+        } catch {
+            return false;
+        }
+    }
+
+    private async broadcastToChannel(channelId: string, eventType: string, payload: Record<string, unknown>, excludeUserId?: string) {
+        const users = await this.executeQuery({
+            sql: `SELECT user_id FROM channel_user WHERE channel_id = ?`,
+            params: [channelId]
+        }) as { user_id: string }[];
+
+        const notification = JSON.stringify({
+            type: eventType,
+            channelId,
+            ...payload
+        });
+
+        for (const { user_id } of users) {
+            if (excludeUserId && user_id === excludeUserId) continue;
+            const socket = this.connections.get(user_id);
+            if (socket && socket.readyState === 1) {
+                try {
+                    socket.send(notification);
+                } catch (error) {
+                    console.error(`[${eventType}] Failed to notify user:`, { userId: user_id, error });
+                    this.connections.delete(user_id);
+                }
+            }
+        }
     }
 
     private setupRoutes() {
@@ -639,12 +719,23 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 params: [userId]
             }) as Record<string, SqlStorageValue>[];
 
-            const channelsWithMemberArray = channels.map(channel => ({
-                ...channel,
-                member_ids: channel.member_ids ? (channel.member_ids as string).split(',') : []
-            }));
+            const channelsFormatted = channels.map(channel => {
+                let adminIds: string[] = [];
+                if (channel.admin_ids) {
+                    try {
+                        adminIds = JSON.parse(channel.admin_ids as string);
+                    } catch {
+                        adminIds = [];
+                    }
+                }
+                return {
+                    ...channel,
+                    member_ids: channel.member_ids ? (channel.member_ids as string).split(',') : [],
+                    admin_ids: adminIds
+                };
+            });
 
-            return c.json({ success: true, channels: channelsWithMemberArray });
+            return c.json({ success: true, channels: channelsFormatted });
         });
 
         this.app.post('/channels', async (c) => {
@@ -672,83 +763,61 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 }, 400);
             }
 
+            const uniqueMembers = Array.isArray(member_ids)
+                ? Array.from(new Set([userId, ...member_ids.filter((id: string) => id !== userId)]))
+                : [userId];
+
+            if (!is_private && uniqueMembers.length < 2) {
+                return c.json({
+                    success: false,
+                    error: 'Group requires at least 2 members'
+                }, 400);
+            }
+
             try {
                 const channelId = crypto.randomUUID();
 
                 await this.executeQuery({
                     sql: `
-                        INSERT INTO channel (id, name, description, is_private)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO channel (id, name, description, is_private, admin_ids)
+                        VALUES (?, ?, ?, ?, ?)
                     `,
-                    params: [channelId, name, description || null, is_private ? 1 : 0]
+                    params: [channelId, name, description || null, is_private ? 1 : 0, JSON.stringify([userId])]
                 });
+
+                const memberValues = uniqueMembers.map(() => `(?, ?, ?)`).join(',');
+                const memberParams = uniqueMembers.flatMap(memberId => [
+                    crypto.randomUUID(),
+                    channelId,
+                    memberId
+                ]);
 
                 await this.executeQuery({
                     sql: `
                         INSERT INTO channel_user (id, channel_id, user_id)
-                        VALUES (?, ?, ?)
+                        VALUES ${memberValues}
                     `,
-                    params: [crypto.randomUUID(), channelId, userId]
+                    params: memberParams
                 });
 
-                if (member_ids && Array.isArray(member_ids) && member_ids.length > 0) {
-                    const memberValues = member_ids
-                        .filter(memberId => memberId !== userId)
-                        .map(memberId => `(?, ?, ?)`).join(',');
+                const formattedChannel = await this.getChannelWithMembers(channelId);
 
-                    const memberParams = member_ids
-                        .filter(memberId => memberId !== userId)
-                        .flatMap(memberId => [
-                            crypto.randomUUID(),
-                            channelId,
-                            memberId
-                        ]);
-
-                    if (memberParams.length > 0) {
-                        await this.executeQuery({
-                            sql: `
-                                INSERT INTO channel_user (id, channel_id, user_id)
-                                VALUES ${memberValues}
-                            `,
-                            params: memberParams
-                        });
-                    }
-                }
-
-                const [channel] = await this.executeQuery({
-                    sql: `
-                        SELECT
-                            c.*,
-                            COUNT(DISTINCT cu2.user_id) as member_count,
-                            GROUP_CONCAT(cu2.user_id) as member_ids
-                        FROM channel c
-                        LEFT JOIN channel_user cu2 ON c.id = cu2.channel_id
-                        WHERE c.id = ?
-                        GROUP BY c.id
-                    `,
-                    params: [channelId],
-                    isRaw: false
-                }) as Record<string, SqlStorageValue>[];
-
-                const formattedChannel = {
-                    ...channel,
-                    member_ids: channel.member_ids ? (channel.member_ids as string).split(',') : []
-                };
-
-                for (const memberId of formattedChannel.member_ids) {
-                    const connection = this.connections.get(memberId as string);
-                    if (connection && connection.readyState === 1) {
-                        try {
-                            connection.send(JSON.stringify({
-                                type: 'NEW_CHANNEL',
-                                channel: formattedChannel
-                            }));
-                        } catch (error) {
-                            console.error('[Channel Creation] Failed to notify user:', {
-                                userId: memberId,
-                                error
-                            });
-                            this.connections.delete(memberId as string);
+                if (formattedChannel) {
+                    for (const memberId of formattedChannel.member_ids) {
+                        const connection = this.connections.get(memberId as string);
+                        if (connection && connection.readyState === 1) {
+                            try {
+                                connection.send(JSON.stringify({
+                                    type: 'NEW_CHANNEL',
+                                    channel: formattedChannel
+                                }));
+                            } catch (error) {
+                                console.error('[Channel Creation] Failed to notify user:', {
+                                    userId: memberId,
+                                    error
+                                });
+                                this.connections.delete(memberId as string);
+                            }
                         }
                     }
                 }
@@ -788,10 +857,10 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
 
             try {
                 const memberValues = userIds.map(() => `(?, ?, ?)`).join(',');
-                const memberParams = userIds.flatMap(userId => [
+                const memberParams = userIds.flatMap((uid: string) => [
                     crypto.randomUUID(),
                     channelId,
-                    userId
+                    uid
                 ]);
 
                 await this.executeQuery({
@@ -802,42 +871,10 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     params: memberParams
                 });
 
-                const [channel] = await this.executeQuery({
-                    sql: `
-                        SELECT
-                            c.*,
-                            COUNT(DISTINCT cu2.user_id) as member_count,
-                            GROUP_CONCAT(cu2.user_id) as member_ids
-                        FROM channel c
-                        LEFT JOIN channel_user cu2 ON c.id = cu2.channel_id
-                        WHERE c.id = ?
-                        GROUP BY c.id
-                    `,
-                    params: [channelId],
-                    isRaw: false
-                }) as Record<string, SqlStorageValue>[];
+                const formattedChannel = await this.getChannelWithMembers(channelId);
 
-                const formattedChannel = {
-                    ...channel,
-                    member_ids: channel.member_ids ? (channel.member_ids as string).split(',') : []
-                };
-
-                for (const memberId of formattedChannel.member_ids) {
-                    const connection = this.connections.get(memberId as string);
-                    if (connection && connection.readyState === 1) {
-                        try {
-                            connection.send(JSON.stringify({
-                                type: 'CHANNEL_UPDATED',
-                                channel: formattedChannel
-                            }));
-                        } catch (error) {
-                            console.error('[Channel Invite] Failed to notify user:', {
-                                userId: memberId,
-                                error
-                            });
-                            this.connections.delete(memberId as string);
-                        }
-                    }
+                if (formattedChannel) {
+                    await this.broadcastToChannel(channelId, 'CHANNEL_UPDATED', { channel: formattedChannel });
                 }
 
                 return c.json({
@@ -863,21 +900,50 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
 
+            const [channelRow] = await this.executeQuery({
+                sql: `SELECT is_private FROM channel WHERE id = ?`,
+                params: [channelId],
+                isRaw: false
+            }) as Record<string, SqlStorageValue>[];
+
+            if (!channelRow) {
+                return c.json({ success: false, error: 'Channel not found' }, 404);
+            }
+
+            const isPrivate = channelRow.is_private === 1;
+            const admin = await this.isAdmin(channelId, userId);
+
+            if (!isPrivate && admin) {
+                return c.json({
+                    success: false,
+                    error: 'Admin must transfer ownership before leaving'
+                }, 403);
+            }
+
             try {
                 await this.executeQuery({
-                    sql: `
-                        DELETE FROM channel_user
-                        WHERE channel_id = ? AND user_id = ?
-                    `,
+                    sql: `DELETE FROM channel_user WHERE channel_id = ? AND user_id = ?`,
                     params: [channelId, userId]
                 });
 
+                if (isPrivate && admin) {
+                    await this.broadcastToChannel(channelId, 'CHANNEL_LEFT', { channelId }, userId);
+
+                    await this.executeQuery({
+                        sql: `DELETE FROM channel_user WHERE channel_id = ?`,
+                        params: [channelId]
+                    });
+
+                    await this.executeQuery({
+                        sql: `DELETE FROM channel WHERE id = ?`,
+                        params: [channelId]
+                    });
+
+                    return c.json({ success: true, deleted: true });
+                }
+
                 const [memberCount] = await this.executeQuery({
-                    sql: `
-                        SELECT COUNT(*) as count
-                        FROM channel_user
-                        WHERE channel_id = ?
-                    `,
+                    sql: `SELECT COUNT(*) as count FROM channel_user WHERE channel_id = ?`,
                     params: [channelId]
                 }) as Record<string, SqlStorageValue>[];
 
@@ -887,48 +953,13 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                         params: [channelId]
                     });
 
-                    return c.json({
-                        success: true,
-                        deleted: true
-                    });
+                    return c.json({ success: true, deleted: true });
                 }
 
-                const [channel] = await this.executeQuery({
-                    sql: `
-                        SELECT
-                            c.*,
-                            COUNT(DISTINCT cu2.user_id) as member_count,
-                            GROUP_CONCAT(cu2.user_id) as member_ids
-                        FROM channel c
-                        LEFT JOIN channel_user cu2 ON c.id = cu2.channel_id
-                        WHERE c.id = ?
-                        GROUP BY c.id
-                    `,
-                    params: [channelId],
-                    isRaw: false
-                }) as Record<string, SqlStorageValue>[];
+                const formattedChannel = await this.getChannelWithMembers(channelId);
 
-                const formattedChannel = {
-                    ...channel,
-                    member_ids: channel.member_ids ? (channel.member_ids as string).split(',') : []
-                };
-
-                for (const memberId of formattedChannel.member_ids) {
-                    const connection = this.connections.get(memberId as string);
-                    if (connection && connection.readyState === 1) {
-                        try {
-                            connection.send(JSON.stringify({
-                                type: 'CHANNEL_UPDATED',
-                                channel: formattedChannel
-                            }));
-                        } catch (error) {
-                            console.error('[Channel Leave] Failed to notify user:', {
-                                userId: memberId,
-                                error
-                            });
-                            this.connections.delete(memberId as string);
-                        }
-                    }
+                if (formattedChannel) {
+                    await this.broadcastToChannel(channelId, 'CHANNEL_UPDATED', { channel: formattedChannel });
                 }
 
                 const leavingUserConnection = this.connections.get(userId);
@@ -959,6 +990,203 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
                     success: false,
                     error: 'Failed to leave channel'
                 }, 500);
+            }
+        });
+
+        this.app.post('/channels/:channelId/kick', async (c) => {
+            const sessionId = c.req.header('X-Session-Id');
+            const channelId = c.req.param('channelId');
+            const { userId: targetUserId } = await c.req.json();
+
+            const { valid, userId } = await this.validateSession(sessionId);
+            if (!valid || !userId) {
+                return c.json({ success: false, error: 'Invalid session' }, 401);
+            }
+
+            const admin = await this.isAdmin(channelId, userId);
+            if (!admin) {
+                return c.json({ success: false, error: 'Only admins can kick' }, 403);
+            }
+
+            if (targetUserId === userId) {
+                return c.json({ success: false, error: 'Cannot kick yourself' }, 400);
+            }
+
+            try {
+                await this.executeQuery({
+                    sql: `DELETE FROM channel_user WHERE channel_id = ? AND user_id = ?`,
+                    params: [channelId, targetUserId]
+                });
+
+                const [memberCount] = await this.executeQuery({
+                    sql: `SELECT COUNT(*) as count FROM channel_user WHERE channel_id = ?`,
+                    params: [channelId]
+                }) as Record<string, SqlStorageValue>[];
+
+                if (memberCount.count === 0) {
+                    await this.executeQuery({
+                        sql: `DELETE FROM channel WHERE id = ?`,
+                        params: [channelId]
+                    });
+
+                    return c.json({ success: true, deleted: true });
+                }
+
+                const formattedChannel = await this.getChannelWithMembers(channelId);
+
+                if (formattedChannel) {
+                    await this.broadcastToChannel(channelId, 'CHANNEL_UPDATED', { channel: formattedChannel });
+                }
+
+                const kickedConnection = this.connections.get(targetUserId);
+                if (kickedConnection && kickedConnection.readyState === 1) {
+                    try {
+                        kickedConnection.send(JSON.stringify({
+                            type: 'CHANNEL_LEFT',
+                            channelId
+                        }));
+                    } catch (error) {
+                        console.error('[Kick] Failed to notify kicked user:', { userId: targetUserId, error });
+                        this.connections.delete(targetUserId);
+                    }
+                }
+
+                return c.json({ success: true, channel: formattedChannel });
+
+            } catch (error) {
+                console.error('Channel kick error:', error);
+                return c.json({ success: false, error: 'Failed to kick user' }, 500);
+            }
+        });
+
+        this.app.post('/channels/:channelId/transfer', async (c) => {
+            const sessionId = c.req.header('X-Session-Id');
+            const channelId = c.req.param('channelId');
+            const { userId: targetUserId } = await c.req.json();
+
+            const { valid, userId } = await this.validateSession(sessionId);
+            if (!valid || !userId) {
+                return c.json({ success: false, error: 'Invalid session' }, 401);
+            }
+
+            const admin = await this.isAdmin(channelId, userId);
+            if (!admin) {
+                return c.json({ success: false, error: 'Only admins can transfer' }, 403);
+            }
+
+            if (targetUserId === userId) {
+                return c.json({ success: false, error: 'Cannot transfer to yourself' }, 400);
+            }
+
+            const [targetMember] = await this.executeQuery({
+                sql: `SELECT 1 FROM channel_user WHERE channel_id = ? AND user_id = ?`,
+                params: [channelId, targetUserId]
+            }) as Record<string, SqlStorageValue>[];
+
+            if (!targetMember) {
+                return c.json({ success: false, error: 'Target is not a member' }, 404);
+            }
+
+            try {
+                await this.executeQuery({
+                    sql: `UPDATE channel SET admin_ids = ? WHERE id = ?`,
+                    params: [JSON.stringify([targetUserId]), channelId]
+                });
+
+                const formattedChannel = await this.getChannelWithMembers(channelId);
+
+                if (formattedChannel) {
+                    await this.broadcastToChannel(channelId, 'CHANNEL_UPDATED', { channel: formattedChannel });
+                }
+
+                return c.json({ success: true, channel: formattedChannel });
+
+            } catch (error) {
+                console.error('Channel transfer error:', error);
+                return c.json({ success: false, error: 'Failed to transfer ownership' }, 500);
+            }
+        });
+
+        this.app.put('/channels/:channelId/avatar', async (c) => {
+            const sessionId = c.req.header('X-Session-Id');
+            const channelId = c.req.param('channelId');
+            const { avatar } = await c.req.json();
+
+            const { valid, userId } = await this.validateSession(sessionId);
+            if (!valid || !userId) {
+                return c.json({ success: false, error: 'Invalid session' }, 401);
+            }
+
+            const [membership] = await this.executeQuery({
+                sql: `SELECT 1 FROM channel_user WHERE channel_id = ? AND user_id = ?`,
+                params: [channelId, userId]
+            }) as Record<string, SqlStorageValue>[];
+
+            if (!membership) {
+                return c.json({ success: false, error: 'Not a member of this channel' }, 403);
+            }
+
+            try {
+                await this.executeQuery({
+                    sql: `UPDATE channel SET avatar = ? WHERE id = ?`,
+                    params: [avatar || null, channelId]
+                });
+
+                const formattedChannel = await this.getChannelWithMembers(channelId);
+
+                if (formattedChannel) {
+                    await this.broadcastToChannel(channelId, 'CHANNEL_UPDATED', { channel: formattedChannel });
+                }
+
+                return c.json({ success: true, channel: formattedChannel });
+
+            } catch (error) {
+                console.error('Channel avatar error:', error);
+                return c.json({ success: false, error: 'Failed to update avatar' }, 500);
+            }
+        });
+
+        this.app.delete('/channels/:channelId', async (c) => {
+            const sessionId = c.req.header('X-Session-Id');
+            const channelId = c.req.param('channelId');
+
+            const { valid, userId } = await this.validateSession(sessionId);
+            if (!valid || !userId) {
+                return c.json({ success: false, error: 'Invalid session' }, 401);
+            }
+
+            const admin = await this.isAdmin(channelId, userId);
+            if (!admin) {
+                return c.json({ success: false, error: 'Only admins can delete' }, 403);
+            }
+
+            const [memberCount] = await this.executeQuery({
+                sql: `SELECT COUNT(*) as count FROM channel_user WHERE channel_id = ?`,
+                params: [channelId]
+            }) as Record<string, SqlStorageValue>[];
+
+            if (memberCount.count > 1) {
+                return c.json({ success: false, error: 'Cannot delete while other members remain' }, 400);
+            }
+
+            try {
+                await this.broadcastToChannel(channelId, 'CHANNEL_LEFT', { channelId });
+
+                await this.executeQuery({
+                    sql: `DELETE FROM channel_user WHERE channel_id = ?`,
+                    params: [channelId]
+                });
+
+                await this.executeQuery({
+                    sql: `DELETE FROM channel WHERE id = ?`,
+                    params: [channelId]
+                });
+
+                return c.json({ success: true, deleted: true });
+
+            } catch (error) {
+                console.error('Channel delete error:', error);
+                return c.json({ success: false, error: 'Failed to delete channel' }, 500);
             }
         });
     }
