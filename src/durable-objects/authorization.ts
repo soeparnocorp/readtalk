@@ -1107,45 +1107,6 @@ export class AuthorizationDurableObject extends DurableObject<Env> {
             }
         });
 
-        this.app.put('/channels/:channelId/info', async (c) => {
-            const sessionId = c.req.header('X-Session-Id');
-            const channelId = c.req.param('channelId');
-            const { name, description } = await c.req.json();
-
-            const { valid, userId } = await this.validateSession(sessionId);
-            if (!valid || !userId) {
-                return c.json({ success: false, error: 'Invalid session' }, 401);
-            }
-
-            if (!name?.trim()) {
-                return c.json({ success: false, error: 'Channel name is required' }, 400);
-            }
-
-            const admin = await this.isAdmin(channelId, userId);
-            if (!admin) {
-                return c.json({ success: false, error: 'Only admins can edit' }, 403);
-            }
-
-            try {
-                await this.executeQuery({
-                    sql: `UPDATE channel SET name = ?, description = ? WHERE id = ?`,
-                    params: [name.trim(), description?.trim() || null, channelId]
-                });
-
-                const formattedChannel = await this.getChannelWithMembers(channelId);
-
-                if (formattedChannel) {
-                    await this.broadcastToChannel(channelId, 'CHANNEL_UPDATED', { channel: formattedChannel });
-                }
-
-                return c.json({ success: true, channel: formattedChannel });
-
-            } catch (error) {
-                console.error('Channel info error:', error);
-                return c.json({ success: false, error: 'Failed to update channel info' }, 500);
-            }
-        });
-
         this.app.put('/channels/:channelId/avatar', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
             const channelId = c.req.param('channelId');
