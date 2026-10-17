@@ -1,99 +1,67 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { Env } from "../types/env";
+import { Env } from "./types/env";
+import { AuthorizationDurableObject } from "./durable-objects/authorization";
+import { ConversationDurableObject } from "./durable-objects/conversation";
+import { UpdateListHandler } from "./durable-objects/updatelist";
 
-export class UpdateListHandler {
-    private app: Hono = new Hono();
-    private env: Env;
+export { AuthorizationDurableObject, ConversationDurableObject };
 
-    constructor(env: Env) {
-        this.env = env;
-        this.setupRoutes();
-    }
+export default {
+    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+        const app = new Hono();
+        const url = new URL(request.url);
 
-    private setupRoutes() {
-        this.app.use('*', cors());
-
-        this.app.get('/updates', async (c) => {
-            const sessionId = c.req.header('X-Session-Id');
-            
-            let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
-            let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
-            const { valid, userId } = await (authDO as any).validateSession(sessionId);
-
-            if (!valid || !userId) {
-                return c.json({ success: false, error: 'Invalid session' }, 401);
+        app.use('*', async (c, next) => {
+            const path = new URL(c.req.url).pathname;
+            if (path === '/ws') {
+                return next();
             }
-
-            const limit = parseInt(c.req.query('limit') || '20');
-            const before = c.req.query('before');
-            const targetUserId = c.req.query('userId');
-
-            let query = `SELECT * FROM updatelist`;
-            let params: any[] = [];
-
-            if (targetUserId) {
-                query += ` WHERE user_id = ?`;
-                params.push(targetUserId);
-            }
-
-            if (before) {
-                query += targetUserId ? ` AND created_at < ?` : ` WHERE created_at < ?`;
-                params.push(before);
-            }
-
-            query += ` ORDER BY created_at DESC LIMIT ?`;
-            params.push(limit);
-
-            const stmt = this.env.UPDATELIST_DATABASE.prepare(query).bind(...params);
-            const { results } = await stmt.all();
-
-            return c.json({
-                success: true,
-                updates: results,
-                hasMore: results.length === limit
-            });
+            return cors()(c, next);
         });
 
-        this.app.post('/updates', async (c) => {
-            const sessionId = c.req.header('X-Session-Id');
-            
-            let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
-            let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
-            const { valid, userId } = await (authDO as any).validateSession(sessionId);
-            
-            if (!valid || !userId) {
-                return c.json({ success: false, error: 'Invalid session' }, 401);
+        app.all('*', async (c) => {
+            if (url.pathname.startsWith('/updates')) {
+                const sessionId = request.headers.get('X-Session-Id');
+                if (!sessionId) {
+                    return new Response('Unauthorized', { status: 401 });
+                }
+
+                const authId = env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
+                const authStub = env.AUTHORIZATION_DURABLE_OBJECT.get(authId);
+                const { valid } = await (authStub as any).validateSession(sessionId);
+                if (!valid) {
+                    return new Response('Access denied', { status: 403 });
+                }
+
+                const updateList = new UpdateListHandler(env);
+                return updateList.getApp().fetch(request);
             }
 
-            const { content, image_url } = await c.req.json();
+            if (url.pathname.startsWith('/channel/')) {
+                const sessionId = request.headers.get('X-Session-Id');
+                const channelId = request.headers.get('X-Channel-Id');
+                if (!sessionId) {
+                    return new Response('Unauthorized', { status: 401 });
+                }
 
-            if (!content?.trim()) {
-                return c.json({ success: false, error: 'Content is required' }, 400);
+                const authId = env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
+                const authStub = env.AUTHORIZATION_DURABLE_OBJECT.get(authId);
+                const hasAccess = await (authStub as any).checkChannelAccess(sessionId, channelId);
+                if (!hasAccess) {
+                    return new Response('Access denied', { status: 403 });
+                }
+
+                const id = env.CONVERSATION_DURABLE_OBJECT.idFromName(`channel-${channelId}`);
+                const stub = env.CONVERSATION_DURABLE_OBJECT.get(id);
+                return stub.fetch(request);
+            } else {
+                let id = env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
+                let stub = env.AUTHORIZATION_DURABLE_OBJECT.get(id);
+                return stub.fetch(request);
             }
-
-            if (content.length > 140) {
-                return c.json({ success: false, error: 'Content must be 140 characters or less' }, 400);
-            }
-
-            const updateId = crypto.randomUUID();
-
-            await this.env.UPDATELIST_DATABASE.prepare(`
-                INSERT INTO updatelist (id, user_id, content, image_url)
-                VALUES (?, ?, ?, ?)
-            `).bind(updateId, userId, content, image_url || null).run();
-
-            const [newUpdate] = await this.env.UPDATELIST_DATABASE.prepare(`
-                SELECT * FROM updatelist WHERE id = ?
-            `).bind(updateId).all();
-
-            await (authDO as any).broadcastUpdate(newUpdate);
-
-            return c.json({ success: true, update: newUpdate });
         });
-    }
 
-    public getApp(): Hono {
-        return this.app;
+        return app.fetch(request, env, ctx);
     }
-}
+} satisfies ExportedHandler<Env>;
