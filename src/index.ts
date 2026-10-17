@@ -1,4 +1,3 @@
-//
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { Env } from "./types/env";
@@ -15,19 +14,21 @@ export default {
 
         app.use('*', async (c, next) => {
             const path = new URL(c.req.url).pathname;
+            
             if (path === '/ws') {
                 return next();
             }
+            
             return cors()(c, next);
         });
-
+        
         app.all('*', async (c) => {
             if (url.pathname.startsWith('/updates')) {
                 const sessionId = request.headers.get('X-Session-Id');
                 if (!sessionId) {
                     return new Response('Unauthorized', { status: 401 });
                 }
-                
+
                 const authId = env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
                 const authStub = env.AUTHORIZATION_DURABLE_OBJECT.get(authId);
                 const { valid } = await (authStub as any).validateSession(sessionId);
