@@ -15,20 +15,30 @@ export class UpdateListHandler {
         this.app.use('*', cors());
 
         this.app.get('/updates', async (c) => {
+            const sessionId = c.req.header('X-Session-Id');
+            
+            let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
+            let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
+            const { valid, userId } = await (authDO as any).validateSession(sessionId);
+
+            if (!valid || !userId) {
+                return c.json({ success: false, error: 'Invalid session' }, 401);
+            }
+
             const limit = parseInt(c.req.query('limit') || '20');
             const before = c.req.query('before');
-            const userId = c.req.query('userId');
+            const targetUserId = c.req.query('userId');
 
             let query = `SELECT * FROM updatelist`;
             let params: any[] = [];
 
-            if (userId) {
+            if (targetUserId) {
                 query += ` WHERE user_id = ?`;
-                params.push(userId);
+                params.push(targetUserId);
             }
 
             if (before) {
-                query += userId ? ` AND created_at < ?` : ` WHERE created_at < ?`;
+                query += targetUserId ? ` AND created_at < ?` : ` WHERE created_at < ?`;
                 params.push(before);
             }
 
@@ -48,10 +58,9 @@ export class UpdateListHandler {
         this.app.post('/updates', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
             
-            const authId = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
-            const authStub = this.env.AUTHORIZATION_DURABLE_OBJECT.get(authId);
-            
-            const { valid, userId } = await (authStub as any).validateSession(sessionId);
+            let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
+            let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
+            const { valid, userId } = await (authDO as any).validateSession(sessionId);
             
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
@@ -78,7 +87,7 @@ export class UpdateListHandler {
                 SELECT * FROM updatelist WHERE id = ?
             `).bind(updateId).all();
 
-            await (authStub as any).broadcastUpdate(newUpdate);
+            await (authDO as any).broadcastUpdate(newUpdate);
 
             return c.json({ success: true, update: newUpdate });
         });
