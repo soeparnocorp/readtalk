@@ -1,0 +1,43 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "readtalk",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-03-03",
+	"migrations": [
+		{
+			"new_sqlite_classes": [
+                "AuthorizationDurableObject",
+				"ConversationDurableObject"
+			],
+			"tag": "v1"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+            {
+				"class_name": "AuthorizationDurableObject",
+				"name": "AUTHORIZATION_DURABLE_OBJECT"
+			},
+			{
+				"class_name": "ConversationDurableObject",
+				"name": "CONVERSATION_DURABLE_OBJECT"
+			}
+		]
+	},
+    "d1_databases": [
+        {
+            "binding": "UPDATELIST_DATABASE",
+            "database_name": "updatelist",
+            "database_id": "c127482b-9b5d-49a2-a624-f9226f5fdcd6"
+        }
+    ],
+    "r2_buckets": [
+        {
+            "binding": "MESSAGE_ASSETS",
+            "bucket_name": "message-assets"
+        }
+    ],
+	"observability": {
+		"enabled": true
+	}
+}
