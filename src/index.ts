@@ -26,10 +26,11 @@ export default {
                 if (!sessionId) {
                     return new Response('Unauthorized', { status: 401 });
                 }
-
+                
                 const authId = env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
                 const authStub = env.AUTHORIZATION_DURABLE_OBJECT.get(authId);
                 const { valid } = await (authStub as any).validateSession(sessionId);
+                
                 if (!valid) {
                     return new Response('Access denied', { status: 403 });
                 }
