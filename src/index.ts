@@ -23,17 +23,6 @@ export default {
         });
 
         app.all('*', async (c) => {
-            if (request.method === 'OPTIONS') {
-                return new Response(null, { 
-                    status: 204,
-                    headers: {
-                        'Access-Control-Allow-Origin': '*',
-                        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-                        'Access-Control-Allow-Headers': 'Content-Type, X-Session-Id, X-Channel-Id',
-                    }
-                });
-            }
-
             if (url.pathname.startsWith('/updates')) {
                 const sessionId = request.headers.get('X-Session-Id');
                 if (!sessionId) {
