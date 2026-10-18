@@ -14,15 +14,26 @@ export default {
 
         app.use('*', async (c, next) => {
             const path = new URL(c.req.url).pathname;
-            
+
             if (path === '/ws') {
                 return next();
             }
-            
+
             return cors()(c, next);
         });
-        
+
         app.all('*', async (c) => {
+            if (request.method === 'OPTIONS') {
+                return new Response(null, { 
+                    status: 204,
+                    headers: {
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+                        'Access-Control-Allow-Headers': 'Content-Type, X-Session-Id, X-Channel-Id',
+                    }
+                });
+            }
+
             if (url.pathname.startsWith('/updates')) {
                 const sessionId = request.headers.get('X-Session-Id');
                 if (!sessionId) {
@@ -32,7 +43,7 @@ export default {
                 const authId = env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
                 const authStub = env.AUTHORIZATION_DURABLE_OBJECT.get(authId);
                 const { valid } = await (authStub as any).validateSession(sessionId);
-                
+
                 if (!valid) {
                     return new Response('Access denied', { status: 403 });
                 }
