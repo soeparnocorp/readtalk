@@ -96,6 +96,60 @@ export class UpdateListHandler {
             return c.json({ success: true, update: newUpdate });
         });
 
+        this.app.put('/updates/:id', async (c) => {
+            const updateId = c.req.param('id');
+            const sessionId = c.req.header('X-Session-Id');
+            
+            let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
+            let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
+            const { valid, userId } = await (authDO as any).validateSession(sessionId);
+            
+            if (!valid || !userId) {
+                return c.json({ success: false, error: 'Invalid session' }, 401);
+            }
+
+            const [existing] = await this.env.UPDATELIST_DATABASE.prepare(`SELECT user_id FROM updatelist WHERE id = ?`).bind(updateId).all();
+            if (!existing || existing.user_id !== userId) {
+                return c.json({ success: false, error: 'Unauthorized to edit this post' }, 403);
+            }
+
+            const { content } = await c.req.json();
+            if (!content?.trim() || content.length > 140) {
+                return c.json({ success: false, error: 'Invalid content' }, 400);
+            }
+
+            await this.env.UPDATELIST_DATABASE.prepare(`
+                UPDATE updatelist SET content = ? WHERE id = ?
+            `).bind(content, updateId).run();
+
+            return c.json({ success: true });
+        });
+
+        this.app.delete('/updates/:id', async (c) => {
+            const updateId = c.req.param('id');
+            const sessionId = c.req.header('X-Session-Id');
+            
+            let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
+            let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
+            const { valid, userId } = await (authDO as any).validateSession(sessionId);
+            
+            if (!valid || !userId) {
+                return c.json({ success: false, error: 'Invalid session' }, 401);
+            }
+
+            const [existing] = await this.env.UPDATELIST_DATABASE.prepare(`SELECT user_id FROM updatelist WHERE id = ?`).bind(updateId).all();
+            if (!existing || existing.user_id !== userId) {
+                return c.json({ success: false, error: 'Unauthorized to delete this post' }, 403);
+            }
+
+            await this.env.UPDATELIST_DATABASE.prepare(`DELETE FROM updatelist WHERE id = ?`).bind(updateId).run();
+            await this.env.UPDATELIST_DATABASE.prepare(`DELETE FROM updatelist_like WHERE updatelist_id = ?`).bind(updateId).run();
+            await this.env.UPDATELIST_DATABASE.prepare(`DELETE FROM updatelist_comment WHERE updatelist_id = ?`).bind(updateId).run();
+            await this.env.UPDATELIST_DATABASE.prepare(`DELETE FROM updatelist_repost WHERE updatelist_id = ?`).bind(updateId).run();
+
+            return c.json({ success: true });
+        });
+
         this.app.get('/updates/:id/comments', async (c) => {
             const updateId = c.req.param('id');
             const stmt = this.env.UPDATELIST_DATABASE.prepare(`
