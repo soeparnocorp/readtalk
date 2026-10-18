@@ -15,24 +15,38 @@ export class UpdateListHandler {
         this.app.use('*', cors());
 
         this.app.get('/updates', async (c) => {
+            const sessionId = c.req.header('X-Session-Id');
             const limit = parseInt(c.req.query('limit') || '20');
             const before = c.req.query('before');
-            const userId = c.req.query('userId');
+            const targetUserId = c.req.query('userId');
 
-            let query = `SELECT * FROM updatelist`;
-            let params: any[] = [];
+            let authId = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
+            let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(authId);
+            const { userId } = await (authDO as any).validateSession(sessionId);
 
-            if (userId) {
-                query += ` WHERE user_id = ?`;
-                params.push(userId);
+            let query = `
+                SELECT 
+                    u.*,
+                    (SELECT COUNT(*) FROM updatelist_like ul WHERE ul.updatelist_id = u.id) as like_count,
+                    (SELECT COUNT(*) FROM updatelist_comment uc WHERE uc.updatelist_id = u.id) as comment_count,
+                    (SELECT COUNT(*) FROM updatelist_repost ur WHERE ur.updatelist_id = u.id) as repost_count,
+                    EXISTS(SELECT 1 FROM updatelist_like ul WHERE ul.updatelist_id = u.id AND ul.user_id = ?) as is_liked,
+                    EXISTS(SELECT 1 FROM updatelist_repost ur WHERE ur.updatelist_id = u.id AND ur.user_id = ?) as is_reposted
+                FROM updatelist u
+            `;
+            let params: any[] = [userId || '', userId || ''];
+
+            if (targetUserId) {
+                query += ` WHERE u.user_id = ?`;
+                params.push(targetUserId);
             }
 
             if (before) {
-                query += userId ? ` AND created_at < ?` : ` WHERE created_at < ?`;
+                query += targetUserId ? ` AND u.created_at < ?` : ` WHERE u.created_at < ?`;
                 params.push(before);
             }
 
-            query += ` ORDER BY created_at DESC LIMIT ?`;
+            query += ` ORDER BY u.created_at DESC LIMIT ?`;
             params.push(limit);
 
             const stmt = this.env.UPDATELIST_DATABASE.prepare(query).bind(...params);
@@ -84,13 +98,10 @@ export class UpdateListHandler {
 
         this.app.get('/updates/:id/comments', async (c) => {
             const updateId = c.req.param('id');
-            
             const stmt = this.env.UPDATELIST_DATABASE.prepare(`
                 SELECT * FROM updatelist_comment WHERE updatelist_id = ? ORDER BY created_at ASC
             `).bind(updateId);
-            
             const { results } = await stmt.all();
-
             return c.json({ success: true, comments: results });
         });
 
