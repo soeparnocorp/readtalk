@@ -12,7 +12,11 @@ export class UpdateListHandler {
     }
 
     private setupRoutes() {
-        this.app.use('*', cors());
+        this.app.use('*', cors({
+            origin: '*',
+            allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+            allowHeaders: ['Content-Type', 'X-Session-Id', 'X-Channel-Id']
+        }));
 
         this.app.get('/updates', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
@@ -61,11 +65,11 @@ export class UpdateListHandler {
 
         this.app.post('/updates', async (c) => {
             const sessionId = c.req.header('X-Session-Id');
-            
+
             let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
             let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
             const { valid, userId } = await (authDO as any).validateSession(sessionId);
-            
+
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
@@ -99,11 +103,11 @@ export class UpdateListHandler {
         this.app.put('/updates/:id', async (c) => {
             const updateId = c.req.param('id');
             const sessionId = c.req.header('X-Session-Id');
-            
+
             let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
             let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
             const { valid, userId } = await (authDO as any).validateSession(sessionId);
-            
+
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
@@ -128,11 +132,11 @@ export class UpdateListHandler {
         this.app.delete('/updates/:id', async (c) => {
             const updateId = c.req.param('id');
             const sessionId = c.req.header('X-Session-Id');
-            
+
             let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
             let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
             const { valid, userId } = await (authDO as any).validateSession(sessionId);
-            
+
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
@@ -162,11 +166,11 @@ export class UpdateListHandler {
         this.app.post('/updates/:id/comments', async (c) => {
             const updateId = c.req.param('id');
             const sessionId = c.req.header('X-Session-Id');
-            
+
             let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
             let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
             const { valid, userId } = await (authDO as any).validateSession(sessionId);
-            
+
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
@@ -194,11 +198,11 @@ export class UpdateListHandler {
         this.app.post('/updates/:id/like', async (c) => {
             const updateId = c.req.param('id');
             const sessionId = c.req.header('X-Session-Id');
-            
+
             let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
             let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
             const { valid, userId } = await (authDO as any).validateSession(sessionId);
-            
+
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
@@ -209,17 +213,17 @@ export class UpdateListHandler {
                     INSERT INTO updatelist_like (id, updatelist_id, user_id)
                     VALUES (?, ?, ?)
                 `).bind(likeId, updateId, userId).run();
-                
+
                 return c.json({ success: true, action: 'liked' });
             } catch (error: any) {
                 if (error.message?.includes('UNIQUE constraint failed')) {
                     await this.env.UPDATELIST_DATABASE.prepare(`
                         DELETE FROM updatelist_like WHERE updatelist_id = ? AND user_id = ?
                     `).bind(updateId, userId).run();
-                    
+
                     return c.json({ success: true, action: 'unliked' });
                 }
-                
+
                 return c.json({ success: false, error: 'Failed to like' }, 500);
             }
         });
@@ -227,11 +231,11 @@ export class UpdateListHandler {
         this.app.post('/updates/:id/repost', async (c) => {
             const updateId = c.req.param('id');
             const sessionId = c.req.header('X-Session-Id');
-            
+
             let id = this.env.AUTHORIZATION_DURABLE_OBJECT.idFromName('default');
             let authDO = this.env.AUTHORIZATION_DURABLE_OBJECT.get(id);
             const { valid, userId } = await (authDO as any).validateSession(sessionId);
-            
+
             if (!valid || !userId) {
                 return c.json({ success: false, error: 'Invalid session' }, 401);
             }
@@ -254,7 +258,7 @@ export class UpdateListHandler {
 
                     return c.json({ success: true, action: 'unreposted' });
                 }
-                
+
                 return c.json({ success: false, error: 'Failed to repost' }, 500);
             }
         });
